@@ -86,7 +86,7 @@ def registrar_usuario(usuario, email, senha):
 @st.cache_data
 def carregar_rotas():
     try:
-        with open("db_rotas_final.json", "r", encoding="utf-8") as f:
+        with open("rotasrj.json", "r", encoding="utf-8") as f:
             return json.load(f)
     except:
         return {}
@@ -195,3 +195,4 @@ elif st.session_state.get("authentication_status") is None:
                             st.success(msg)
                         else:
                             st.error(msg)
+
