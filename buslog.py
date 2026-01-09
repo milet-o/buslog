@@ -6,38 +6,88 @@ from github import Github
 import io
 import time
 import bcrypt
-import hashlib
 
-# --- CONFIGURAÇÃO INICIAL (LAYOUT WIDE PARA CABER MAIS COISA) ---
+# --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(page_title="BusBoxd", page_icon="🚌", layout="centered")
 
-# --- CSS PERSONALIZADO (ESTÉTICA LETTERBOXD) ---
+# --- CSS PERSONALIZADO (NOISE + CARDS + FONTS) ---
 st.markdown("""
     <style>
-    .big-day {
-        font-size: 40px;
-        font-weight: bold;
-        color: #e0e0e0;
-        line-height: 1;
-        text-align: center;
+    /* 1. FUNDO GRANULADO (NOISE) */
+    .stApp {
+        background-color: #0e1117;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
     }
+
+    /* 2. CABEÇALHO DO MÊS */
     .month-header {
-        font-size: 24px;
-        font-weight: bold;
+        font-size: 18px;
+        font-weight: 600;
         color: #888;
-        border-bottom: 1px solid #444;
-        margin-top: 20px;
+        margin-top: 25px;
         margin-bottom: 10px;
-        padding-bottom: 5px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    /* 3. CARD DA VIAGEM (CAIXA CINZA) */
+    .journal-card {
+        display: flex;
+        background-color: #262730; /* Cinza do card */
+        border-radius: 8px;
+        margin-bottom: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        overflow: hidden; /* Para cortar a faixa arredondada */
+        align-items: center; /* Centraliza verticalmente */
+        height: 70px;
+        transition: transform 0.1s;
+    }
+    .journal-card:hover {
+        transform: scale(1.01);
+        background-color: #2d2e38;
+    }
+
+    /* 4. FAIXA VERTICAL COLORIDA */
+    .strip {
+        width: 6px;
+        height: 100%;
+        background-color: #FF4B4B; /* Vermelho Streamlit (ou mude a cor) */
+        border-top-left-radius: 8px;
+        border-bottom-left-radius: 8px;
+    }
+
+    /* 5. DATA (DIA) */
+    .date-col {
+        width: 60px;
+        text-align: center;
+        font-size: 26px;
+        font-weight: 300; /* Fonte fina/sutil */
+        color: #e0e0e0;
+        padding-left: 10px;
+    }
+
+    /* 6. CONTEÚDO (LINHA E HORA) */
+    .info-col {
+        flex-grow: 1;
+        padding-left: 15px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
     .bus-line {
         font-size: 18px;
         font-weight: bold;
-        color: #4CAF50; /* Verde onibus */
+        color: #ffffff;
     }
-    .route-info {
-        font-size: 14px;
+    .meta-info {
+        font-size: 13px;
         color: #aaa;
+        margin-top: 2px;
+    }
+    
+    /* Remove padding padrão chato do Streamlit */
+    .block-container {
+        padding-top: 2rem;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -52,7 +102,7 @@ except FileNotFoundError:
 
 ARQUIVO_DB_VIAGENS = "viagens.csv"
 ARQUIVO_DB_USUARIOS = "usuarios.json"
-ARQUIVO_ROTAS = "rotasrj.json" # Corrigido conforme solicitado
+ARQUIVO_ROTAS = "rotasrj.json"
 
 # --- FUNÇÕES DE GITHUB ---
 def get_repo():
@@ -80,7 +130,7 @@ def atualizar_arquivo_github(nome_arquivo, conteudo, mensagem_commit):
     except:
         repo.create_file(nome_arquivo, mensagem_commit, conteudo)
 
-# --- FUNÇÕES DE SEGURANÇA ---
+# --- SEGURANÇA ---
 def hash_senha(password):
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
@@ -90,7 +140,6 @@ def verificar_senha(password, hashed):
 # --- REGISTRO E LOGIN ---
 def registrar_usuario(usuario, senha):
     db_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
-    
     if usuario in db_usuarios:
         return False, "Usuário já existe! Escolha outro."
     
@@ -98,10 +147,9 @@ def registrar_usuario(usuario, senha):
         "password": hash_senha(senha),
         "created_at": str(datetime.now())
     }
-    
     json_str = json.dumps(db_usuarios, indent=4)
     atualizar_arquivo_github(ARQUIVO_DB_USUARIOS, json_str, f"Novo usuario: {usuario}")
-    return True, "Conta criada com sucesso!" # Mensagem alterada
+    return True, "Conta criada com sucesso!"
 
 def fazer_login(usuario, senha):
     db_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
@@ -115,12 +163,10 @@ def fazer_login(usuario, senha):
 @st.cache_data
 def carregar_rotas():
     try:
-        # Tenta ler localmente primeiro (para teste), depois tenta no GitHub se falhar
         try:
             with open(ARQUIVO_ROTAS, "r", encoding="utf-8") as f:
                 return json.load(f)
         except:
-            # Se não achar local, baixa do repo (útil se você não subiu o json pro github ainda)
             return ler_arquivo_github(ARQUIVO_ROTAS, 'json')
     except:
         return {}
@@ -128,7 +174,6 @@ def carregar_rotas():
 rotas_db = carregar_rotas()
 lista_linhas = list(rotas_db.keys()) if rotas_db else []
 
-# --- TRADUÇÃO DE MESES ---
 MESES_PT = {
     1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL", 5: "MAIO", 6: "JUNHO",
     7: "JULHO", 8: "AGOSTO", 9: "SETEMBRO", 10: "OUTUBRO", 11: "NOVEMBRO", 12: "DEZEMBRO"
@@ -151,21 +196,22 @@ if st.session_state["logado"]:
     
     aba1, aba2 = st.tabs(["📝 Nova Viagem", "📓 Diário"])
     
-    # --- ABA 1: REGISTRO ---
+    # --- ABA 1: REGISTRO (SIMPLIFICADA) ---
     with aba1:
         with st.form("nova_viagem"):
             c1, c2 = st.columns(2)
-            # format="DD/MM/YYYY" faz aparecer no padrão BR
+            
+            # Data Atual
             data = c1.date_input("Data", datetime.now(), format="DD/MM/YYYY") 
-            hora = c2.time_input("Hora", datetime.now())
+            
+            # Hora Atual (Forçamos o refresh da hora usando value direto)
+            hora_atual = datetime.now().time()
+            hora = c2.time_input("Hora", value=hora_atual)
             
             linha = st.selectbox("Linha", [""] + lista_linhas)
             
-            co1, co2 = st.columns(2)
-            origem = co1.text_input("Origem")
-            destino = co2.text_input("Destino")
-            
-            obs = st.text_area("Observações")
+            # REMOVIDOS: Origem e Destino
+            obs = st.text_area("Observações (Opcional)", height=80)
             
             if st.form_submit_button("Salvar Viagem", use_container_width=True):
                 if not linha:
@@ -177,9 +223,7 @@ if st.session_state["logado"]:
                             "usuario": st.session_state['usuario_atual'], 
                             "linha": linha,
                             "data": str(data),
-                            "hora": str(hora)[:5], # Pega só HH:MM
-                            "origem": origem,
-                            "destino": destino,
+                            "hora": str(hora)[:5],
                             "obs": obs,
                             "timestamp": str(datetime.now())
                         }
@@ -190,38 +234,29 @@ if st.session_state["logado"]:
                         time.sleep(1)
                         st.rerun()
 
-    # --- ABA 2: HISTÓRICO ESTILO LETTERBOXD ---
+    # --- ABA 2: HISTÓRICO VISUAL (CARDS) ---
     with aba2:
         df = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
         
         if not df.empty:
-            # Filtra apenas viagens do usuário logado
             df = df[df['usuario'] == st.session_state['usuario_atual']]
-            
-            # Converte coluna data para datetime
             df['data_obj'] = pd.to_datetime(df['data'])
             
-            # --- FILTROS ---
-            filtro_tempo = st.pills("Filtrar por:", ["Tudo", "7 Dias", "30 Dias", "Este Ano"], default="Tudo")
+            # Filtros
+            filtro_tempo = st.pills("Período:", ["Tudo", "7 Dias", "30 Dias", "Este Ano"], default="Tudo")
             
             hoje = datetime.now()
             if filtro_tempo == "7 Dias":
-                data_limite = hoje - timedelta(days=7)
-                df = df[df['data_obj'] >= data_limite]
+                df = df[df['data_obj'] >= (hoje - timedelta(days=7))]
             elif filtro_tempo == "30 Dias":
-                data_limite = hoje - timedelta(days=30)
-                df = df[df['data_obj'] >= data_limite]
+                df = df[df['data_obj'] >= (hoje - timedelta(days=30))]
             elif filtro_tempo == "Este Ano":
                 df = df[df['data_obj'].dt.year == hoje.year]
             
-            # Ordena: Mais recente primeiro
             df = df.sort_values(by='data_obj', ascending=False)
-            
-            # Cria colunas auxiliares para agrupamento
             df['ano'] = df['data_obj'].dt.year
             df['mes'] = df['data_obj'].dt.month
             
-            # Agrupa por Ano e Mês (para criar os cabeçalhos)
             grupos = df.groupby(['ano', 'mes'], sort=False)
             
             if df.empty:
@@ -229,34 +264,29 @@ if st.session_state["logado"]:
             else:
                 for (ano, mes), grupo in grupos:
                     nome_mes = MESES_PT[mes]
-                    # Cabeçalho do Mês (Ex: DEZEMBRO 2025)
+                    # Header do Mês
                     st.markdown(f"<div class='month-header'>{nome_mes} {ano}</div>", unsafe_allow_html=True)
                     
                     for _, row in grupo.iterrows():
-                        # Layout da linha: [Dia] | [Info da Linha]
-                        col_dia, col_info = st.columns([1, 5])
+                        obs_texto = f" • {row['obs']}" if pd.notna(row['obs']) and row['obs'] else ""
                         
-                        with col_dia:
-                            # Dia bem grande
-                            st.markdown(f"<div class='big-day'>{row['data_obj'].day}</div>", unsafe_allow_html=True)
-                        
-                        with col_info:
-                            # Nome da Linha
-                            st.markdown(f"<span class='bus-line'>{row['linha']}</span>", unsafe_allow_html=True)
-                            
-                            # Origem > Destino e Hora
-                            txt_rota = f"{row['origem']} ➝ {row['destino']}" if row['origem'] or row['destino'] else "Rota não informada"
-                            st.markdown(f"<div class='route-info'>{txt_rota} • 🕒 {str(row['hora'])[:5]}</div>", unsafe_allow_html=True)
-                            
-                            # Observação (se tiver)
-                            if pd.notna(row['obs']) and row['obs']:
-                                st.caption(f"📝 {row['obs']}")
-                        
-                        st.divider() # Linha separadora fina
+                        # Aqui montamos o HTML do CARD
+                        card_html = f"""
+                        <div class="journal-card">
+                            <div class="strip"></div>
+                            <div class="date-col">{row['data_obj'].day}</div>
+                            <div class="info-col">
+                                <div class="bus-line">{row['linha']}</div>
+                                <div class="meta-info">🕒 {str(row['hora'])[:5]}{obs_texto}</div>
+                            </div>
+                        </div>
+                        """
+                        st.markdown(card_html, unsafe_allow_html=True)
+
         else:
             st.info("Seu diário está vazio. Comece a catalogar!")
 
-# --- TELA DE LOGIN ---
+# --- LOGIN / CADASTRO ---
 else:
     tab_login, tab_cadastro = st.tabs(["Entrar", "Criar Conta"])
     
@@ -264,7 +294,7 @@ else:
         l_user = st.text_input("Usuário")
         l_pass = st.text_input("Senha", type="password")
         if st.button("ENTRAR", use_container_width=True):
-            with st.spinner("Verificando..."):
+            with st.spinner("Entrando..."):
                 if fazer_login(l_user, l_pass):
                     st.session_state["logado"] = True
                     st.session_state["usuario_atual"] = l_user
@@ -282,7 +312,7 @@ else:
             if c_pass != c_pass2:
                 st.error("Senhas não batem!")
             elif len(c_pass) < 4:
-                st.error("Senha muito curta!")
+                st.error("Senha curta demais!")
             elif not c_user:
                 st.error("Digite um usuário!")
             else:
