@@ -8,65 +8,67 @@ import time
 import bcrypt
 
 # --- CONFIGURAÇÃO INICIAL ---
-st.set_page_config(page_title="BusBoxd", page_icon="🚌", layout="centered")
+st.set_page_config(page_title="BusLog", page_icon="🚌", layout="centered")
 
-# --- CSS PERSONALIZADO (NOISE + CARDS + FONTS) ---
+# --- CSS PERSONALIZADO ---
 st.markdown("""
     <style>
-    /* 1. FUNDO GRANULADO (NOISE) */
+    /* Fundo granulado */
     .stApp {
         background-color: #0e1117;
         background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
     }
-
-    /* 2. CABEÇALHO DO MÊS */
+    
+    /* Header do Mês */
     .month-header {
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 600;
-        color: #888;
-        margin-top: 25px;
+        color: #666;
+        margin-top: 30px;
         margin-bottom: 10px;
         text-transform: uppercase;
-        letter-spacing: 1px;
+        letter-spacing: 2px;
+        border-bottom: 1px solid #333;
+        padding-bottom: 5px;
     }
 
-    /* 3. CARD DA VIAGEM (CAIXA CINZA) */
+    /* Card da Viagem */
     .journal-card {
         display: flex;
-        background-color: #262730; /* Cinza do card */
-        border-radius: 8px;
-        margin-bottom: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-        overflow: hidden; /* Para cortar a faixa arredondada */
-        align-items: center; /* Centraliza verticalmente */
-        height: 70px;
-        transition: transform 0.1s;
+        background-color: #1c1c1e; /* Cinza mais escuro/elegante */
+        border-radius: 6px;
+        margin-bottom: 8px;
+        border: 1px solid #333;
+        align-items: center;
+        height: 75px;
+        transition: all 0.2s ease;
     }
     .journal-card:hover {
-        transform: scale(1.01);
-        background-color: #2d2e38;
+        transform: translateX(5px);
+        border-color: #555;
+        background-color: #252528;
     }
 
-    /* 4. FAIXA VERTICAL COLORIDA */
+    /* Faixa Vertical */
     .strip {
-        width: 6px;
+        width: 4px;
         height: 100%;
-        background-color: #FF4B4B; /* Vermelho Streamlit (ou mude a cor) */
-        border-top-left-radius: 8px;
-        border-bottom-left-radius: 8px;
+        background-color: #FF4B4B;
+        border-top-left-radius: 6px;
+        border-bottom-left-radius: 6px;
     }
 
-    /* 5. DATA (DIA) */
+    /* Data */
     .date-col {
         width: 60px;
         text-align: center;
-        font-size: 26px;
-        font-weight: 300; /* Fonte fina/sutil */
-        color: #e0e0e0;
-        padding-left: 10px;
+        font-size: 24px;
+        font-weight: 400;
+        color: #eee;
+        font-family: 'Helvetica Neue', sans-serif;
     }
 
-    /* 6. CONTEÚDO (LINHA E HORA) */
+    /* Informações */
     .info-col {
         flex-grow: 1;
         padding-left: 15px;
@@ -75,19 +77,22 @@ st.markdown("""
         justify-content: center;
     }
     .bus-line {
-        font-size: 18px;
-        font-weight: bold;
-        color: #ffffff;
+        font-size: 17px;
+        font-weight: 700;
+        color: #fff;
+        letter-spacing: 0.5px;
     }
     .meta-info {
         font-size: 13px;
-        color: #aaa;
-        margin-top: 2px;
+        color: #888;
+        margin-top: 4px;
     }
     
-    /* Remove padding padrão chato do Streamlit */
-    .block-container {
-        padding-top: 2rem;
+    /* Aviso de Privacidade */
+    .privacy-warning {
+        font-size: 12px;
+        color: #ff6c6c;
+        margin-bottom: 5px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -104,7 +109,13 @@ ARQUIVO_DB_VIAGENS = "viagens.csv"
 ARQUIVO_DB_USUARIOS = "usuarios.json"
 ARQUIVO_ROTAS = "rotasrj.json"
 
-# --- FUNÇÕES DE GITHUB ---
+# --- ESTADO DE SESSÃO (PARA FORÇAR REFRESH DO FORMULÁRIO) ---
+if "form_key" not in st.session_state:
+    st.session_state["form_key"] = 0
+if "limite_registros" not in st.session_state:
+    st.session_state["limite_registros"] = 10  # Começa mostrando 10
+
+# --- FUNÇÕES ---
 def get_repo():
     g = Github(GITHUB_TOKEN)
     return g.get_repo(REPO_NAME)
@@ -114,13 +125,10 @@ def ler_arquivo_github(nome_arquivo, tipo='json'):
         repo = get_repo()
         contents = repo.get_contents(nome_arquivo)
         decodificado = contents.decoded_content.decode("utf-8")
-        if tipo == 'json':
-            return json.loads(decodificado)
-        else:
-            return pd.read_csv(io.StringIO(decodificado))
+        if tipo == 'json': return json.loads(decodificado)
+        else: return pd.read_csv(io.StringIO(decodificado))
     except:
-        if tipo == 'json': return {}
-        else: return pd.DataFrame()
+        return {} if tipo == 'json' else pd.DataFrame()
 
 def atualizar_arquivo_github(nome_arquivo, conteudo, mensagem_commit):
     repo = get_repo()
@@ -130,23 +138,18 @@ def atualizar_arquivo_github(nome_arquivo, conteudo, mensagem_commit):
     except:
         repo.create_file(nome_arquivo, mensagem_commit, conteudo)
 
-# --- SEGURANÇA ---
 def hash_senha(password):
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 def verificar_senha(password, hashed):
     return bcrypt.checkpw(password.encode(), hashed.encode())
 
-# --- REGISTRO E LOGIN ---
 def registrar_usuario(usuario, senha):
     db_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
-    if usuario in db_usuarios:
-        return False, "Usuário já existe! Escolha outro."
+    if usuario in db_usuarios: return False, "Usuário já existe!"
     
-    db_usuarios[usuario] = {
-        "password": hash_senha(senha),
-        "created_at": str(datetime.now())
-    }
+    db_usuarios[usuario] = { "password": hash_senha(senha), "created_at": str(datetime.now()) }
+    
     json_str = json.dumps(db_usuarios, indent=4)
     atualizar_arquivo_github(ARQUIVO_DB_USUARIOS, json_str, f"Novo usuario: {usuario}")
     return True, "Conta criada com sucesso!"
@@ -154,33 +157,24 @@ def registrar_usuario(usuario, senha):
 def fazer_login(usuario, senha):
     db_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
     if usuario in db_usuarios:
-        stored_pass = db_usuarios[usuario]['password']
-        if verificar_senha(senha, stored_pass):
-            return True
+        if verificar_senha(senha, db_usuarios[usuario]['password']): return True
     return False
 
-# --- CARREGAR ROTAS ---
 @st.cache_data
 def carregar_rotas():
     try:
         try:
-            with open(ARQUIVO_ROTAS, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return ler_arquivo_github(ARQUIVO_ROTAS, 'json')
-    except:
-        return {}
+            with open(ARQUIVO_ROTAS, "r", encoding="utf-8") as f: return json.load(f)
+        except: return ler_arquivo_github(ARQUIVO_ROTAS, 'json')
+    except: return {}
 
 rotas_db = carregar_rotas()
 lista_linhas = list(rotas_db.keys()) if rotas_db else []
 
-MESES_PT = {
-    1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL", 5: "MAIO", 6: "JUNHO",
-    7: "JULHO", 8: "AGOSTO", 9: "SETEMBRO", 10: "OUTUBRO", 11: "NOVEMBRO", 12: "DEZEMBRO"
-}
+MESES_PT = {1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL", 5: "MAIO", 6: "JUNHO", 7: "JULHO", 8: "AGOSTO", 9: "SETEMBRO", 10: "OUTUBRO", 11: "NOVEMBRO", 12: "DEZEMBRO"}
 
 # --- INTERFACE ---
-st.title("🚌 BusBoxd")
+st.title("🚌 BusLog")
 
 if "logado" not in st.session_state:
     st.session_state["logado"] = False
@@ -188,30 +182,33 @@ if "logado" not in st.session_state:
 
 # --- ÁREA LOGADA ---
 if st.session_state["logado"]:
-    c_user, c_logout = st.columns([8, 2])
-    c_user.write(f"Olá, **{st.session_state['usuario_atual']}**")
-    if c_logout.button("Sair"):
-        st.session_state["logado"] = False
-        st.rerun()
+    # Sidebar para Logout
+    with st.sidebar:
+        st.write(f"Logado como: **{st.session_state['usuario_atual']}**")
+        if st.button("Sair do BusLog"):
+            st.session_state["logado"] = False
+            st.rerun()
     
     aba1, aba2 = st.tabs(["📝 Nova Viagem", "📓 Diário"])
     
-    # --- ABA 1: REGISTRO (SIMPLIFICADA) ---
+    # --- ABA 1: REGISTRO ---
     with aba1:
-        with st.form("nova_viagem"):
+        # Usamos uma key dinâmica (st.session_state["form_key"]) para o formulário.
+        # Quando salvamos, mudamos essa key, o que obriga o Streamlit a recriar
+        # os widgets do zero, atualizando a hora para o datetime.now() atual.
+        key_atual = st.session_state["form_key"]
+        
+        with st.form(f"nova_viagem_{key_atual}"):
             c1, c2 = st.columns(2)
             
-            # Data Atual
+            # Data e Hora Fresquinhas
             data = c1.date_input("Data", datetime.now(), format="DD/MM/YYYY") 
-            
-            # Hora Atual (Forçamos o refresh da hora usando value direto)
-            hora_atual = datetime.now().time()
-            hora = c2.time_input("Hora", value=hora_atual)
+            hora = c2.time_input("Hora", datetime.now()) # Agora vai atualizar!
             
             linha = st.selectbox("Linha", [""] + lista_linhas)
             
-            # REMOVIDOS: Origem e Destino
-            obs = st.text_area("Observações (Opcional)", height=80)
+            st.markdown('<div class="privacy-warning">⚠ Atenção: Este diário é público. Não escreva informações que te identifiquem ou te incriminem.</div>', unsafe_allow_html=True)
+            obs = st.text_area("Observações (Opcional)", height=80, placeholder="Ex: Motorista correu muito / Ar condicionado quebrado...")
             
             if st.form_submit_button("Salvar Viagem", use_container_width=True):
                 if not linha:
@@ -230,11 +227,14 @@ if st.session_state["logado"]:
                         df_novo = pd.DataFrame([novo_dado])
                         df_final = pd.concat([df_antigo, df_novo], ignore_index=True)
                         atualizar_arquivo_github(ARQUIVO_DB_VIAGENS, df_final.to_csv(index=False), "Nova viagem")
+                        
                         st.success("Registrado!")
+                        # Incrementa a key para forçar reset do form e atualizar hora
+                        st.session_state["form_key"] += 1 
                         time.sleep(1)
                         st.rerun()
 
-    # --- ABA 2: HISTÓRICO VISUAL (CARDS) ---
+    # --- ABA 2: HISTÓRICO OTIMIZADO ---
     with aba2:
         df = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
         
@@ -242,35 +242,31 @@ if st.session_state["logado"]:
             df = df[df['usuario'] == st.session_state['usuario_atual']]
             df['data_obj'] = pd.to_datetime(df['data'])
             
-            # Filtros
-            filtro_tempo = st.pills("Período:", ["Tudo", "7 Dias", "30 Dias", "Este Ano"], default="Tudo")
-            
-            hoje = datetime.now()
-            if filtro_tempo == "7 Dias":
-                df = df[df['data_obj'] >= (hoje - timedelta(days=7))]
-            elif filtro_tempo == "30 Dias":
-                df = df[df['data_obj'] >= (hoje - timedelta(days=30))]
-            elif filtro_tempo == "Este Ano":
-                df = df[df['data_obj'].dt.year == hoje.year]
-            
+            # Ordena: Mais recente primeiro
             df = df.sort_values(by='data_obj', ascending=False)
-            df['ano'] = df['data_obj'].dt.year
-            df['mes'] = df['data_obj'].dt.month
             
-            grupos = df.groupby(['ano', 'mes'], sort=False)
+            # --- PAGINAÇÃO (LIMITADOR) ---
+            # Mostra apenas X registros para não travar
+            total_registros = len(df)
+            limite = st.session_state["limite_registros"]
+            
+            df_view = df.head(limite) # Pega apenas os primeiros X
+            
+            # Renderização
+            df_view['ano'] = df_view['data_obj'].dt.year
+            df_view['mes'] = df_view['data_obj'].dt.month
+            grupos = df_view.groupby(['ano', 'mes'], sort=False)
             
             if df.empty:
-                st.info("Nenhuma viagem nesse período.")
+                st.info("Nenhuma viagem registrada.")
             else:
                 for (ano, mes), grupo in grupos:
                     nome_mes = MESES_PT[mes]
-                    # Header do Mês
                     st.markdown(f"<div class='month-header'>{nome_mes} {ano}</div>", unsafe_allow_html=True)
                     
                     for _, row in grupo.iterrows():
                         obs_texto = f" • {row['obs']}" if pd.notna(row['obs']) and row['obs'] else ""
                         
-                        # Aqui montamos o HTML do CARD
                         card_html = f"""
                         <div class="journal-card">
                             <div class="strip"></div>
@@ -282,6 +278,16 @@ if st.session_state["logado"]:
                         </div>
                         """
                         st.markdown(card_html, unsafe_allow_html=True)
+                
+                # Botão "Carregar Mais"
+                if total_registros > limite:
+                    st.markdown("---")
+                    col_load, _ = st.columns([1, 2])
+                    if col_load.button(f"Carregar mais antigos ({total_registros - limite} restantes)"):
+                        st.session_state["limite_registros"] += 10 # Carrega mais 10
+                        st.rerun()
+                elif total_registros > 10:
+                    st.caption("Você chegou ao fim do diário.")
 
         else:
             st.info("Seu diário está vazio. Comece a catalogar!")
