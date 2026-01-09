@@ -1,12 +1,11 @@
 import streamlit as st
-import streamlit_authenticator as stauth
 import json
 import pandas as pd
 from datetime import datetime
 from github import Github
 import io
 import time
-import bcrypt # Biblioteca padrao de criptografia
+import bcrypt
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(page_title="BusBoxd", page_icon="🚌", layout="centered")
@@ -15,7 +14,6 @@ st.set_page_config(page_title="BusBoxd", page_icon="🚌", layout="centered")
 try:
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
     REPO_NAME = st.secrets["REPO_NAME"] 
-    COOKIE_KEY = st.secrets["COOKIE_KEY"]
 except FileNotFoundError:
     st.error("Configure os Secrets no Streamlit Cloud!")
     st.stop()
@@ -38,8 +36,7 @@ def ler_arquivo_github(nome_arquivo, tipo='json'):
         else:
             return pd.read_csv(io.StringIO(decodificado))
     except:
-        # Retornos vazios seguros
-        if tipo == 'json': return {"usernames": {}}
+        if tipo == 'json': return {}
         else: return pd.DataFrame()
 
 def atualizar_arquivo_github(nome_arquivo, conteudo, mensagem_commit):
@@ -50,39 +47,44 @@ def atualizar_arquivo_github(nome_arquivo, conteudo, mensagem_commit):
     except:
         repo.create_file(nome_arquivo, mensagem_commit, conteudo)
 
-# --- FUNÇÃO DE REGISTRO (CORRIGIDA COM BCRYPT) ---
-def registrar_usuario(usuario, email, senha):
+# --- FUNÇÕES DE SEGURANÇA ---
+def hash_senha(password):
+    """Cria o hash seguro da senha"""
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+def verificar_senha(password, hashed):
+    """Confere se a senha bate"""
+    return bcrypt.checkpw(password.encode(), hashed.encode())
+
+# --- FUNÇÕES DE REGISTRO E LOGIN ---
+def registrar_usuario(usuario, senha):
     db_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
     
-    # Garante que a chave 'usernames' existe
-    if 'usernames' not in db_usuarios:
-        db_usuarios['usernames'] = {}
-
-    if usuario in db_usuarios['usernames']:
-        return False, "Usuário já existe!"
+    # Verifica se usuário já existe
+    if usuario in db_usuarios:
+        return False, "Usuário já existe! Escolha outro."
     
-    try:
-        # Criptografia manual via bcrypt (Mais estável que o Hasher da lib)
-        senha_bytes = senha.encode('utf-8')
-        salt = bcrypt.gensalt()
-        hashed_password = bcrypt.hashpw(senha_bytes, salt).decode('utf-8')
-        
-        # Adiciona ao dicionário
-        db_usuarios['usernames'][usuario] = {
-            "name": usuario, 
-            "password": hashed_password,
-            "email": email
-        }
-        
-        # Salva no GitHub
-        json_str = json.dumps(db_usuarios, indent=4)
-        atualizar_arquivo_github(ARQUIVO_DB_USUARIOS, json_str, f"Novo usuário: {usuario}")
-        return True, "Conta criada! Vá na aba 'Entrar' para fazer login."
-        
-    except Exception as e:
-        return False, f"Erro técnico ao criar senha: {e}"
+    # Salva no dicionário (Usuário legível, senha segura)
+    db_usuarios[usuario] = {
+        "password": hash_senha(senha),
+        "created_at": str(datetime.now())
+    }
+    
+    # Salva no GitHub
+    json_str = json.dumps(db_usuarios, indent=4)
+    atualizar_arquivo_github(ARQUIVO_DB_USUARIOS, json_str, f"Novo usuario: {usuario}")
+    return True, "Conta criada! Pode fazer login."
 
-# --- CARREGAR DADOS ---
+def fazer_login(usuario, senha):
+    db_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
+    
+    if usuario in db_usuarios:
+        stored_pass = db_usuarios[usuario]['password']
+        if verificar_senha(senha, stored_pass):
+            return True
+    return False
+
+# --- CARREGAR ROTAS ---
 @st.cache_data
 def carregar_rotas():
     try:
@@ -94,33 +96,24 @@ def carregar_rotas():
 rotas_db = carregar_rotas()
 lista_linhas = list(rotas_db.keys())
 
-# --- LÓGICA DE AUTENTICAÇÃO ---
-config_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
-
-# Proteção contra arquivo vazio ou corrupto
-if 'usernames' not in config_usuarios or not config_usuarios['usernames']:
-    # Cria um usuario fake na memoria so pra o autenticador nao quebrar antes de ter alguem cadastrado
-    config_usuarios = {'usernames': {'admin_temp': {'password': '123', 'name': 'temp', 'email': 't@t.com'}}}
-
-authenticator = stauth.Authenticate(
-    config_usuarios, # Passa o dicionario inteiro
-    'busboxd_cookie',
-    COOKIE_KEY,
-    30
-)
-
 # --- INTERFACE ---
 st.title("🚌 BusBoxd")
 
-# O login renderiza aqui
-authenticator.login('main')
+# Inicializa estado de login
+if "logado" not in st.session_state:
+    st.session_state["logado"] = False
+    st.session_state["usuario_atual"] = ""
 
-# Verifica o estado da sessão
-if st.session_state.get("authentication_status"):
-    authenticator.logout('Sair', 'sidebar')
-    st.write(f"Olá, **{st.session_state['name']}**!")
+# --- SE ESTIVER LOGADO ---
+if st.session_state["logado"]:
+    c_user, c_logout = st.columns([8, 2])
+    c_user.write(f"Olá, **{st.session_state['usuario_atual']}**!")
     
-    # --- ÁREA LOGADA ---
+    if c_logout.button("Sair"):
+        st.session_state["logado"] = False
+        st.session_state["usuario_atual"] = ""
+        st.rerun()
+    
     aba1, aba2 = st.tabs(["📝 Nova Viagem", "📋 Histórico"])
     
     with aba1:
@@ -141,7 +134,7 @@ if st.session_state.get("authentication_status"):
                         df_antigo = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
                         
                         novo_dado = {
-                            "usuario": st.session_state['username'],
+                            "usuario": st.session_state['usuario_atual'], 
                             "linha": linha,
                             "data": str(data),
                             "hora": str(hora),
@@ -167,32 +160,40 @@ if st.session_state.get("authentication_status"):
         else:
             st.info("Nenhuma viagem ainda.")
 
-elif st.session_state.get("authentication_status") is False:
-    st.error('Usuário ou senha incorretos')
-
-elif st.session_state.get("authentication_status") is None:
-    # --- ÁREA DESLOGADA (CRIAR CONTA) ---
-    st.markdown("---")
-    with st.expander("Não tem conta? Crie aqui"):
-        with st.form("form_cadastro"):
-            st.write("### Criar Nova Conta")
-            novo_user = st.text_input("Usuário (Login)")
-            novo_email = st.text_input("Email")
-            nova_senha = st.text_input("Senha", type="password")
-            nova_senha2 = st.text_input("Confirme a Senha", type="password")
-            
-            if st.form_submit_button("CRIAR CONTA"):
-                if nova_senha != nova_senha2:
-                    st.error("As senhas não batem!")
-                elif len(nova_senha) < 4:
-                    st.error("Senha muito curta!")
-                elif not novo_user:
-                    st.error("Digite um usuário!")
+# --- TELA DE LOGIN / CADASTRO ---
+else:
+    tab_login, tab_cadastro = st.tabs(["Entrar", "Criar Conta"])
+    
+    with tab_login:
+        l_user = st.text_input("Usuário")
+        l_pass = st.text_input("Senha", type="password")
+        
+        if st.button("ENTRAR", use_container_width=True):
+            with st.spinner("Verificando..."):
+                if fazer_login(l_user, l_pass):
+                    st.session_state["logado"] = True
+                    st.session_state["usuario_atual"] = l_user
+                    st.rerun()
                 else:
-                    with st.spinner("Criando conta..."):
-                        sucesso, msg = registrar_usuario(novo_user, novo_email, nova_senha)
-                        if sucesso:
-                            st.success(msg)
-                        else:
-                            st.error(msg)
+                    st.error("Usuário ou senha incorretos.")
 
+    with tab_cadastro:
+        st.write("### Novo Usuário")
+        c_user = st.text_input("Escolha um Usuário")
+        c_pass = st.text_input("Escolha uma Senha", type="password", key="reg_pass")
+        c_pass2 = st.text_input("Confirme a Senha", type="password", key="reg_pass2")
+        
+        if st.button("CRIAR CONTA", use_container_width=True):
+            if c_pass != c_pass2:
+                st.error("Senhas não batem!")
+            elif len(c_pass) < 4:
+                st.error("Senha muito curta!")
+            elif not c_user:
+                st.error("Digite um usuário!")
+            else:
+                with st.spinner("Criando conta..."):
+                    sucesso, msg = registrar_usuario(c_user, c_pass)
+                    if sucesso:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
