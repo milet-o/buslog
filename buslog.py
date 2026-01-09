@@ -13,15 +13,10 @@ st.set_page_config(page_title="BusBoxd", page_icon="🚌", layout="centered")
 # --- SEGREDOS ---
 try:
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-    # Seus segredos devem ter:
-    # GITHUB_TOKEN = "ghp_xxxxxxxxxxxx"
-    # REPO_NAME = "seu_usuario/seu_repo"
-    # COOKIE_KEY = "qualquer_coisa_aleatoria"
-    
     REPO_NAME = st.secrets["REPO_NAME"] 
     COOKIE_KEY = st.secrets["COOKIE_KEY"]
 except FileNotFoundError:
-    st.error("Configure o .streamlit/secrets.toml com GITHUB_TOKEN, REPO_NAME e COOKIE_KEY")
+    st.error("Configure os Secrets no Streamlit Cloud!")
     st.stop()
 
 ARQUIVO_DB_VIAGENS = "viagens.csv"
@@ -53,27 +48,31 @@ def atualizar_arquivo_github(nome_arquivo, conteudo, mensagem_commit):
     except:
         repo.create_file(nome_arquivo, mensagem_commit, conteudo)
 
-# --- FUNÇÃO DE REGISTRO DE NOVO USUÁRIO ---
-def registrar_usuario(nome, usuario, email, senha):
+# --- FUNÇÃO DE REGISTRO (ATUALIZADA: SEM NOME E COM CORREÇÃO DE HASH) ---
+def registrar_usuario(usuario, email, senha):
     db_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
     
     if usuario in db_usuarios['usernames']:
         return False, "Usuário já existe!"
     
-    # Criptografa a senha
-    hashed_password = stauth.Hasher([senha]).generate()[0]
+    # CORREÇÃO DO ERRO DE HASH AQUI
+    try:
+        # Tenta o método novo
+        hashed_password = stauth.Hasher([senha]).generate()[0]
+    except Exception as e:
+        return False, f"Erro ao criar senha: {e}"
     
-    # Adiciona ao dicionário
+    # Adiciona ao dicionário (Usa o usuário como nome também)
     db_usuarios['usernames'][usuario] = {
-        "name": nome,
+        "name": usuario, 
         "password": hashed_password,
         "email": email
     }
     
-    # Salva no GitHub (converte dict para texto json bonitinho)
+    # Salva no GitHub
     json_str = json.dumps(db_usuarios, indent=4)
     atualizar_arquivo_github(ARQUIVO_DB_USUARIOS, json_str, f"Novo usuário: {usuario}")
-    return True, "Conta criada com sucesso! Faça login."
+    return True, "Conta criada! Faça login na outra aba."
 
 # --- CARREGAR DADOS ---
 @st.cache_data
@@ -88,10 +87,8 @@ rotas_db = carregar_rotas()
 lista_linhas = list(rotas_db.keys())
 
 # --- LÓGICA DE AUTENTICAÇÃO ---
-# 1. Baixa os usuários atuais do GitHub
 config_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
 
-# 2. Configura o Authenticator
 authenticator = stauth.Authenticate(
     {'usernames': config_usuarios['usernames']},
     'busboxd_cookie',
@@ -102,12 +99,15 @@ authenticator = stauth.Authenticate(
 # --- INTERFACE ---
 st.title("🚌 BusBoxd")
 
-# Verifica se já está logado
-if st.session_state.get("authentication_status"):
+# --- CORREÇÃO DO ERRO DE LOGIN (USANDO SESSION STATE) ---
+# O login agora é renderizado aqui, mas verificamos o estado depois
+authenticator.login('main')
+
+if st.session_state["authentication_status"]:
     authenticator.logout('Sair', 'sidebar')
     st.write(f"Olá, **{st.session_state['name']}**!")
     
-    # --- ÁREA LOGADA (CATALOGAR) ---
+    # --- ÁREA LOGADA ---
     aba1, aba2 = st.tabs(["📝 Nova Viagem", "📋 Histórico"])
     
     with aba1:
@@ -125,12 +125,10 @@ if st.session_state.get("authentication_status"):
                     st.error("Escolha a linha!")
                 else:
                     with st.spinner("Salvando..."):
-                        # Lê o CSV atual do GitHub
                         df_antigo = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
                         
                         novo_dado = {
                             "usuario": st.session_state['username'],
-                            "nome": st.session_state['name'],
                             "linha": linha,
                             "data": str(data),
                             "hora": str(hora),
@@ -140,7 +138,6 @@ if st.session_state.get("authentication_status"):
                             "timestamp": str(datetime.now())
                         }
                         
-                        # Junta e salva
                         df_novo = pd.DataFrame([novo_dado])
                         df_final = pd.concat([df_antigo, df_novo], ignore_index=True)
                         atualizar_arquivo_github(ARQUIVO_DB_VIAGENS, df_final.to_csv(index=False), "Nova viagem")
@@ -157,42 +154,33 @@ if st.session_state.get("authentication_status"):
         else:
             st.info("Nenhuma viagem ainda.")
 
-else:
-    # --- ÁREA DESLOGADA (LOGIN OU CADASTRO) ---
-    tab_login, tab_cadastro = st.tabs(["Entrar", "Criar Conta"])
-    
-    with tab_login:
-        authenticator.login('main')
-        if st.session_state['authentication_status'] is False:
-            st.error('Usuário ou senha incorretos')
-        elif st.session_state['authentication_status'] is None:
-            st.warning('Faça login para acessar')
+elif st.session_state["authentication_status"] is False:
+    st.error('Usuário ou senha incorretos')
 
-    with tab_cadastro:
-        st.header("Novo por aqui?")
+elif st.session_state["authentication_status"] is None:
+    # --- ÁREA DESLOGADA (CRIAR CONTA) ---
+    # Só mostra o cadastro se não estiver logado
+    with st.expander("Não tem conta? Crie aqui"):
         with st.form("form_cadastro"):
-            novo_nome = st.text_input("Seu Nome Completo")
+            st.write("### Criar Nova Conta")
+            # REMOVIDO O CAMPO NOME COMPLETO
             novo_user = st.text_input("Usuário (Login)")
             novo_email = st.text_input("Email")
             nova_senha = st.text_input("Senha", type="password")
             nova_senha2 = st.text_input("Confirme a Senha", type="password")
             
-            btn_criar = st.form_submit_button("CRIAR CONTA")
-            
-            if btn_criar:
+            if st.form_submit_button("CRIAR CONTA"):
                 if nova_senha != nova_senha2:
                     st.error("As senhas não batem!")
                 elif len(nova_senha) < 4:
                     st.error("Senha muito curta!")
-                elif not novo_user or not novo_nome:
-                    st.error("Preencha tudo!")
+                elif not novo_user:
+                    st.error("Digite um usuário!")
                 else:
-                    with st.spinner("Criando conta no sistema..."):
-                        sucesso, msg = registrar_usuario(novo_nome, novo_user, novo_email, nova_senha)
+                    with st.spinner("Criando conta..."):
+                        # Passamos o proprio usuario como nome
+                        sucesso, msg = registrar_usuario(novo_user, novo_email, nova_senha)
                         if sucesso:
                             st.success(msg)
-                            st.info("Agora vá na aba 'Entrar' e faça login.")
                         else:
-
                             st.error(msg)
-
