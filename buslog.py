@@ -6,6 +6,7 @@ from datetime import datetime
 from github import Github
 import io
 import time
+import bcrypt # Biblioteca padrao de criptografia
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(page_title="BusBoxd", page_icon="🚌", layout="centered")
@@ -37,6 +38,7 @@ def ler_arquivo_github(nome_arquivo, tipo='json'):
         else:
             return pd.read_csv(io.StringIO(decodificado))
     except:
+        # Retornos vazios seguros
         if tipo == 'json': return {"usernames": {}}
         else: return pd.DataFrame()
 
@@ -48,31 +50,37 @@ def atualizar_arquivo_github(nome_arquivo, conteudo, mensagem_commit):
     except:
         repo.create_file(nome_arquivo, mensagem_commit, conteudo)
 
-# --- FUNÇÃO DE REGISTRO (ATUALIZADA: SEM NOME E COM CORREÇÃO DE HASH) ---
+# --- FUNÇÃO DE REGISTRO (CORRIGIDA COM BCRYPT) ---
 def registrar_usuario(usuario, email, senha):
     db_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
     
+    # Garante que a chave 'usernames' existe
+    if 'usernames' not in db_usuarios:
+        db_usuarios['usernames'] = {}
+
     if usuario in db_usuarios['usernames']:
         return False, "Usuário já existe!"
     
-    # CORREÇÃO DO ERRO DE HASH AQUI
     try:
-        # Tenta o método novo
-        hashed_password = stauth.Hasher([senha]).generate()[0]
+        # Criptografia manual via bcrypt (Mais estável que o Hasher da lib)
+        senha_bytes = senha.encode('utf-8')
+        salt = bcrypt.gensalt()
+        hashed_password = bcrypt.hashpw(senha_bytes, salt).decode('utf-8')
+        
+        # Adiciona ao dicionário
+        db_usuarios['usernames'][usuario] = {
+            "name": usuario, 
+            "password": hashed_password,
+            "email": email
+        }
+        
+        # Salva no GitHub
+        json_str = json.dumps(db_usuarios, indent=4)
+        atualizar_arquivo_github(ARQUIVO_DB_USUARIOS, json_str, f"Novo usuário: {usuario}")
+        return True, "Conta criada! Vá na aba 'Entrar' para fazer login."
+        
     except Exception as e:
-        return False, f"Erro ao criar senha: {e}"
-    
-    # Adiciona ao dicionário (Usa o usuário como nome também)
-    db_usuarios['usernames'][usuario] = {
-        "name": usuario, 
-        "password": hashed_password,
-        "email": email
-    }
-    
-    # Salva no GitHub
-    json_str = json.dumps(db_usuarios, indent=4)
-    atualizar_arquivo_github(ARQUIVO_DB_USUARIOS, json_str, f"Novo usuário: {usuario}")
-    return True, "Conta criada! Faça login na outra aba."
+        return False, f"Erro técnico ao criar senha: {e}"
 
 # --- CARREGAR DADOS ---
 @st.cache_data
@@ -89,8 +97,13 @@ lista_linhas = list(rotas_db.keys())
 # --- LÓGICA DE AUTENTICAÇÃO ---
 config_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
 
+# Proteção contra arquivo vazio ou corrupto
+if 'usernames' not in config_usuarios or not config_usuarios['usernames']:
+    # Cria um usuario fake na memoria so pra o autenticador nao quebrar antes de ter alguem cadastrado
+    config_usuarios = {'usernames': {'admin_temp': {'password': '123', 'name': 'temp', 'email': 't@t.com'}}}
+
 authenticator = stauth.Authenticate(
-    {'usernames': config_usuarios['usernames']},
+    config_usuarios, # Passa o dicionario inteiro
     'busboxd_cookie',
     COOKIE_KEY,
     30
@@ -99,11 +112,11 @@ authenticator = stauth.Authenticate(
 # --- INTERFACE ---
 st.title("🚌 BusBoxd")
 
-# --- CORREÇÃO DO ERRO DE LOGIN (USANDO SESSION STATE) ---
-# O login agora é renderizado aqui, mas verificamos o estado depois
+# O login renderiza aqui
 authenticator.login('main')
 
-if st.session_state["authentication_status"]:
+# Verifica o estado da sessão
+if st.session_state.get("authentication_status"):
     authenticator.logout('Sair', 'sidebar')
     st.write(f"Olá, **{st.session_state['name']}**!")
     
@@ -154,16 +167,15 @@ if st.session_state["authentication_status"]:
         else:
             st.info("Nenhuma viagem ainda.")
 
-elif st.session_state["authentication_status"] is False:
+elif st.session_state.get("authentication_status") is False:
     st.error('Usuário ou senha incorretos')
 
-elif st.session_state["authentication_status"] is None:
+elif st.session_state.get("authentication_status") is None:
     # --- ÁREA DESLOGADA (CRIAR CONTA) ---
-    # Só mostra o cadastro se não estiver logado
+    st.markdown("---")
     with st.expander("Não tem conta? Crie aqui"):
         with st.form("form_cadastro"):
             st.write("### Criar Nova Conta")
-            # REMOVIDO O CAMPO NOME COMPLETO
             novo_user = st.text_input("Usuário (Login)")
             novo_email = st.text_input("Email")
             nova_senha = st.text_input("Senha", type="password")
@@ -178,7 +190,6 @@ elif st.session_state["authentication_status"] is None:
                     st.error("Digite um usuário!")
                 else:
                     with st.spinner("Criando conta..."):
-                        # Passamos o proprio usuario como nome
                         sucesso, msg = registrar_usuario(novo_user, novo_email, nova_senha)
                         if sucesso:
                             st.success(msg)
