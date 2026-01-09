@@ -6,6 +6,7 @@ from github import Github
 import io
 import time
 import bcrypt
+import base64
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(page_title="BusLog", page_icon="🚌", layout="centered")
@@ -19,10 +20,8 @@ st.markdown("""
         background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
     }
     
-    /* 2. ESCONDER DICAS DO STREAMLIT (Ctrl+Enter) */
-    [data-testid="InputInstructions"] {
-        display: none;
-    }
+    /* 2. ESCONDER DICAS DO STREAMLIT */
+    [data-testid="InputInstructions"] { display: none; }
     
     /* 3. HEADER DO MÊS */
     .month-header {
@@ -44,10 +43,10 @@ st.markdown("""
         border-radius: 6px;
         margin-bottom: 8px;
         border: 1px solid #333;
-        align-items: stretch; /* Garante que a faixa acompanhe a altura */
-        min-height: 75px; /* Altura mínima, cresce se precisar */
+        align-items: stretch; 
+        min-height: 75px; 
         transition: all 0.2s ease;
-        overflow: hidden; /* Corta qualquer coisa que tente sair da caixa */
+        overflow: hidden; 
     }
     .journal-card:hover {
         transform: translateX(5px);
@@ -55,11 +54,11 @@ st.markdown("""
         background-color: #252528;
     }
 
-    /* 5. FAIXA VERTICAL (CORRIGIDA) */
+    /* 5. FAIXA VERTICAL */
     .strip {
         width: 5px;
         background-color: #FF4B4B;
-        flex-shrink: 0; /* IMPEDE A FAIXA DE SUMIR/ENCOLHER */
+        flex-shrink: 0; 
     }
 
     /* 6. DATA */
@@ -71,17 +70,17 @@ st.markdown("""
         font-size: 24px;
         font-weight: 400;
         color: #eee;
-        flex-shrink: 0; /* Impede a data de encolher */
+        flex-shrink: 0; 
     }
 
-    /* 7. CONTEÚDO (CORRIGIDO PARA NÃO ESTOURAR) */
+    /* 7. CONTEÚDO */
     .info-col {
         flex-grow: 1;
         padding: 10px 15px;
         display: flex;
         flex-direction: column;
         justify-content: center;
-        min-width: 0; /* Truque CSS para flexbox respeitar quebra de linha */
+        min-width: 0; 
     }
     .bus-line {
         font-size: 17px;
@@ -89,13 +88,13 @@ st.markdown("""
         color: #fff;
         white-space: nowrap;
         overflow: hidden;
-        text-overflow: ellipsis; /* Põe ... se o nome da linha for gigante */
+        text-overflow: ellipsis; 
     }
     .meta-info {
         font-size: 13px;
         color: #888;
         margin-top: 4px;
-        word-wrap: break-word; /* Quebra texto longo */
+        word-wrap: break-word; 
         overflow-wrap: break-word;
         line-height: 1.4;
     }
@@ -173,6 +172,24 @@ def fazer_login(usuario, senha):
         if verificar_senha(senha, db_usuarios[usuario]['password']): return True
     return False
 
+# --- FUNÇÃO DE ÁUDIO CORRIGIDA PARA M4A ---
+def tocar_buzina():
+    """Lê o arquivo bushorn.m4a e toca no navegador"""
+    arquivo_som = "bushorn.m4a" # NOME CORRIGIDO
+    try:
+        with open(arquivo_som, "rb") as f:
+            data = f.read()
+            b64 = base64.b64encode(data).decode()
+            # TIPO CORRIGIDO PARA audio/mp4 (que é o padrão do m4a)
+            md = f"""
+                <audio autoplay>
+                <source src="data:audio/mp4;base64,{b64}" type="audio/mp4">
+                </audio>
+            """
+            st.markdown(md, unsafe_allow_html=True)
+    except FileNotFoundError:
+        pass 
+
 @st.cache_data
 def carregar_rotas():
     try:
@@ -214,8 +231,6 @@ if st.session_state["logado"]:
             linha = st.selectbox("Linha", [""] + lista_linhas)
             
             st.markdown('<div class="privacy-warning">⚠ Atenção: Este diário é público. Não escreva informações pessoais.</div>', unsafe_allow_html=True)
-            
-            # Limite de 50 caracteres e sem placeholder
             obs = st.text_area("Observações (Opcional)", height=68, max_chars=50)
             
             if st.form_submit_button("Salvar Viagem", use_container_width=True):
@@ -236,6 +251,8 @@ if st.session_state["logado"]:
                         df_final = pd.concat([df_antigo, df_novo], ignore_index=True)
                         atualizar_arquivo_github(ARQUIVO_DB_VIAGENS, df_final.to_csv(index=False), "Nova viagem")
                         
+                        tocar_buzina() # TOCA O SOM
+                        
                         st.success("Registrado!")
                         st.session_state["form_key"] += 1 
                         time.sleep(1)
@@ -248,11 +265,11 @@ if st.session_state["logado"]:
         if not df.empty:
             df = df[df['usuario'] == st.session_state['usuario_atual']]
             
-            # Cria coluna combinada Data+Hora para ordenação perfeita
-            # Concatena a string Data (YYYY-MM-DD) com Hora (HH:MM)
-            df['datetime_full'] = pd.to_datetime(df['data'] + ' ' + df['hora'])
+            df['data'] = df['data'].astype(str)
+            df['hora'] = df['hora'].astype(str)
+            df['datetime_full'] = pd.to_datetime(df['data'] + ' ' + df['hora'], errors='coerce')
+            df = df.dropna(subset=['datetime_full'])
             
-            # Filtros
             filtro_tempo = st.pills("Período:", ["Tudo", "7 Dias", "30 Dias", "Este Ano"], default="Tudo")
             
             hoje = datetime.now()
@@ -263,21 +280,18 @@ if st.session_state["logado"]:
             elif filtro_tempo == "Este Ano":
                 df = df[df['datetime_full'].dt.year == hoje.year]
             
-            # ORDENAÇÃO: Do mais recente para o mais antigo (Data E Hora)
             df = df.sort_values(by='datetime_full', ascending=False)
             
-            # Paginação
             total_registros = len(df)
             limite = st.session_state["limite_registros"]
             df_view = df.head(limite)
             
-            # Renderização
             df_view['ano'] = df_view['datetime_full'].dt.year
             df_view['mes'] = df_view['datetime_full'].dt.month
             grupos = df_view.groupby(['ano', 'mes'], sort=False)
             
             if df.empty:
-                st.info("Nenhuma viagem registrada.")
+                st.info("Nenhuma viagem válida encontrada neste período.")
             else:
                 for (ano, mes), grupo in grupos:
                     nome_mes = MESES_PT[mes]
@@ -298,7 +312,6 @@ if st.session_state["logado"]:
                         """
                         st.markdown(card_html, unsafe_allow_html=True)
                 
-                # Botão Carregar Mais
                 if total_registros > limite:
                     st.markdown("---")
                     col_load, _ = st.columns([1, 2])
