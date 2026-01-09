@@ -13,13 +13,18 @@ st.set_page_config(page_title="BusLog", page_icon="🚌", layout="centered")
 # --- CSS PERSONALIZADO ---
 st.markdown("""
     <style>
-    /* Fundo granulado */
+    /* 1. FUNDO GRANULADO */
     .stApp {
         background-color: #0e1117;
         background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
     }
     
-    /* Header do Mês */
+    /* 2. ESCONDER DICAS DO STREAMLIT (Ctrl+Enter) */
+    [data-testid="InputInstructions"] {
+        display: none;
+    }
+    
+    /* 3. HEADER DO MÊS */
     .month-header {
         font-size: 16px;
         font-weight: 600;
@@ -32,16 +37,17 @@ st.markdown("""
         padding-bottom: 5px;
     }
 
-    /* Card da Viagem */
+    /* 4. CARD DA VIAGEM */
     .journal-card {
         display: flex;
-        background-color: #1c1c1e; /* Cinza mais escuro/elegante */
+        background-color: #1c1c1e;
         border-radius: 6px;
         margin-bottom: 8px;
         border: 1px solid #333;
-        align-items: center;
-        height: 75px;
+        align-items: stretch; /* Garante que a faixa acompanhe a altura */
+        min-height: 75px; /* Altura mínima, cresce se precisar */
         transition: all 0.2s ease;
+        overflow: hidden; /* Corta qualquer coisa que tente sair da caixa */
     }
     .journal-card:hover {
         transform: translateX(5px);
@@ -49,50 +55,57 @@ st.markdown("""
         background-color: #252528;
     }
 
-    /* Faixa Vertical */
+    /* 5. FAIXA VERTICAL (CORRIGIDA) */
     .strip {
-        width: 4px;
-        height: 100%;
+        width: 5px;
         background-color: #FF4B4B;
-        border-top-left-radius: 6px;
-        border-bottom-left-radius: 6px;
+        flex-shrink: 0; /* IMPEDE A FAIXA DE SUMIR/ENCOLHER */
     }
 
-    /* Data */
+    /* 6. DATA */
     .date-col {
         width: 60px;
-        text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         font-size: 24px;
         font-weight: 400;
         color: #eee;
-        font-family: 'Helvetica Neue', sans-serif;
+        flex-shrink: 0; /* Impede a data de encolher */
     }
 
-    /* Informações */
+    /* 7. CONTEÚDO (CORRIGIDO PARA NÃO ESTOURAR) */
     .info-col {
         flex-grow: 1;
-        padding-left: 15px;
+        padding: 10px 15px;
         display: flex;
         flex-direction: column;
         justify-content: center;
+        min-width: 0; /* Truque CSS para flexbox respeitar quebra de linha */
     }
     .bus-line {
         font-size: 17px;
         font-weight: 700;
         color: #fff;
-        letter-spacing: 0.5px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis; /* Põe ... se o nome da linha for gigante */
     }
     .meta-info {
         font-size: 13px;
         color: #888;
         margin-top: 4px;
+        word-wrap: break-word; /* Quebra texto longo */
+        overflow-wrap: break-word;
+        line-height: 1.4;
     }
     
-    /* Aviso de Privacidade */
+    /* 8. AVISO DE PRIVACIDADE */
     .privacy-warning {
         font-size: 12px;
         color: #ff6c6c;
         margin-bottom: 5px;
+        font-weight: 500;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -109,11 +122,11 @@ ARQUIVO_DB_VIAGENS = "viagens.csv"
 ARQUIVO_DB_USUARIOS = "usuarios.json"
 ARQUIVO_ROTAS = "rotasrj.json"
 
-# --- ESTADO DE SESSÃO (PARA FORÇAR REFRESH DO FORMULÁRIO) ---
+# --- ESTADO DE SESSÃO ---
 if "form_key" not in st.session_state:
     st.session_state["form_key"] = 0
 if "limite_registros" not in st.session_state:
-    st.session_state["limite_registros"] = 10  # Começa mostrando 10
+    st.session_state["limite_registros"] = 10 
 
 # --- FUNÇÕES ---
 def get_repo():
@@ -182,7 +195,6 @@ if "logado" not in st.session_state:
 
 # --- ÁREA LOGADA ---
 if st.session_state["logado"]:
-    # Sidebar para Logout
     with st.sidebar:
         st.write(f"Logado como: **{st.session_state['usuario_atual']}**")
         if st.button("Sair do BusLog"):
@@ -193,22 +205,18 @@ if st.session_state["logado"]:
     
     # --- ABA 1: REGISTRO ---
     with aba1:
-        # Usamos uma key dinâmica (st.session_state["form_key"]) para o formulário.
-        # Quando salvamos, mudamos essa key, o que obriga o Streamlit a recriar
-        # os widgets do zero, atualizando a hora para o datetime.now() atual.
         key_atual = st.session_state["form_key"]
         
         with st.form(f"nova_viagem_{key_atual}"):
             c1, c2 = st.columns(2)
-            
-            # Data e Hora Fresquinhas
             data = c1.date_input("Data", datetime.now(), format="DD/MM/YYYY") 
-            hora = c2.time_input("Hora", datetime.now()) # Agora vai atualizar!
-            
+            hora = c2.time_input("Hora", datetime.now())
             linha = st.selectbox("Linha", [""] + lista_linhas)
             
-            st.markdown('<div class="privacy-warning">⚠ Atenção: Este diário é público. Não escreva informações que te identifiquem ou te incriminem.</div>', unsafe_allow_html=True)
-            obs = st.text_area("Observações (Opcional)", height=80, placeholder="Ex: Motorista correu muito / Ar condicionado quebrado...")
+            st.markdown('<div class="privacy-warning">⚠ Atenção: Este diário é público. Não escreva informações pessoais.</div>', unsafe_allow_html=True)
+            
+            # Limite de 50 caracteres e sem placeholder
+            obs = st.text_area("Observações (Opcional)", height=68, max_chars=50)
             
             if st.form_submit_button("Salvar Viagem", use_container_width=True):
                 if not linha:
@@ -229,32 +237,43 @@ if st.session_state["logado"]:
                         atualizar_arquivo_github(ARQUIVO_DB_VIAGENS, df_final.to_csv(index=False), "Nova viagem")
                         
                         st.success("Registrado!")
-                        # Incrementa a key para forçar reset do form e atualizar hora
                         st.session_state["form_key"] += 1 
                         time.sleep(1)
                         st.rerun()
 
-    # --- ABA 2: HISTÓRICO OTIMIZADO ---
+    # --- ABA 2: HISTÓRICO ---
     with aba2:
         df = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
         
         if not df.empty:
             df = df[df['usuario'] == st.session_state['usuario_atual']]
-            df['data_obj'] = pd.to_datetime(df['data'])
             
-            # Ordena: Mais recente primeiro
-            df = df.sort_values(by='data_obj', ascending=False)
+            # Cria coluna combinada Data+Hora para ordenação perfeita
+            # Concatena a string Data (YYYY-MM-DD) com Hora (HH:MM)
+            df['datetime_full'] = pd.to_datetime(df['data'] + ' ' + df['hora'])
             
-            # --- PAGINAÇÃO (LIMITADOR) ---
-            # Mostra apenas X registros para não travar
+            # Filtros
+            filtro_tempo = st.pills("Período:", ["Tudo", "7 Dias", "30 Dias", "Este Ano"], default="Tudo")
+            
+            hoje = datetime.now()
+            if filtro_tempo == "7 Dias":
+                df = df[df['datetime_full'] >= (hoje - timedelta(days=7))]
+            elif filtro_tempo == "30 Dias":
+                df = df[df['datetime_full'] >= (hoje - timedelta(days=30))]
+            elif filtro_tempo == "Este Ano":
+                df = df[df['datetime_full'].dt.year == hoje.year]
+            
+            # ORDENAÇÃO: Do mais recente para o mais antigo (Data E Hora)
+            df = df.sort_values(by='datetime_full', ascending=False)
+            
+            # Paginação
             total_registros = len(df)
             limite = st.session_state["limite_registros"]
-            
-            df_view = df.head(limite) # Pega apenas os primeiros X
+            df_view = df.head(limite)
             
             # Renderização
-            df_view['ano'] = df_view['data_obj'].dt.year
-            df_view['mes'] = df_view['data_obj'].dt.month
+            df_view['ano'] = df_view['datetime_full'].dt.year
+            df_view['mes'] = df_view['datetime_full'].dt.month
             grupos = df_view.groupby(['ano', 'mes'], sort=False)
             
             if df.empty:
@@ -270,7 +289,7 @@ if st.session_state["logado"]:
                         card_html = f"""
                         <div class="journal-card">
                             <div class="strip"></div>
-                            <div class="date-col">{row['data_obj'].day}</div>
+                            <div class="date-col">{row['datetime_full'].day}</div>
                             <div class="info-col">
                                 <div class="bus-line">{row['linha']}</div>
                                 <div class="meta-info">🕒 {str(row['hora'])[:5]}{obs_texto}</div>
@@ -279,12 +298,12 @@ if st.session_state["logado"]:
                         """
                         st.markdown(card_html, unsafe_allow_html=True)
                 
-                # Botão "Carregar Mais"
+                # Botão Carregar Mais
                 if total_registros > limite:
                     st.markdown("---")
                     col_load, _ = st.columns([1, 2])
                     if col_load.button(f"Carregar mais antigos ({total_registros - limite} restantes)"):
-                        st.session_state["limite_registros"] += 10 # Carrega mais 10
+                        st.session_state["limite_registros"] += 10 
                         st.rerun()
                 elif total_registros > 10:
                     st.caption("Você chegou ao fim do diário.")
