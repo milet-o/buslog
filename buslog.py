@@ -162,10 +162,10 @@ else:
     tab_login, tab_cadastro = st.tabs(["Entrar", "Criar Conta"])
     
     with tab_login:
-        name, authentication_status, username = authenticator.login('main')
-        if authentication_status is False:
+        authenticator.login('main')
+        if st.session_state['authentication_status'] is False:
             st.error('Usuário ou senha incorretos')
-        elif authentication_status is None:
+        elif st.session_state['authentication_status'] is None:
             st.warning('Faça login para acessar')
 
     with tab_cadastro:
@@ -195,3 +195,4 @@ else:
                         else:
 
                             st.error(msg)
+
