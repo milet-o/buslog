@@ -15,7 +15,7 @@ st.set_page_config(page_title="BusLog", page_icon="🚌", layout="centered")
 st.markdown("""
     <style>
     /* 1. FORÇAR TEXTOS CLAROS */
-    h1, h2, h3, h4, h5, h6, p, span, label, .stMarkdown { color: #e0e0e0 !important; }
+    h1, h2, h3, h4, h5, h6, p, span, label, .stMarkdown, .stText, div[data-testid="stMetricValue"] { color: #e0e0e0 !important; }
     .stTextInput > label, .stSelectbox > label, .stDateInput > label, .stTimeInput > label, .stTextArea > label { color: #e0e0e0 !important; }
     
     /* 2. FUNDO GRANULADO */
@@ -112,10 +112,38 @@ st.markdown("""
         font-weight: 500;
     }
 
-    /* 10. ESTILO DO BOTÃO DE DELETAR */
-    /* Ajuste fino para o botão ficar alinhado verticalmente com o card */
+    /* 10. BOTÃO DE DELETAR */
     div[data-testid="column"] button {
         margin-top: 15px; 
+    }
+
+    /* 11. ESTILO DO PERFIL */
+    .profile-header {
+        background-color: #1c1c1e;
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #333;
+        text-align: center;
+        margin-bottom: 20px;
+    }
+    .avatar {
+        font-size: 60px;
+        margin-bottom: 10px;
+    }
+    .display-name {
+        font-size: 24px;
+        font-weight: bold;
+        color: #fff;
+    }
+    .username-tag {
+        font-size: 14px;
+        color: #888;
+        margin-bottom: 10px;
+    }
+    .bio-text {
+        font-size: 14px;
+        color: #ccc;
+        font-style: italic;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -130,6 +158,7 @@ except FileNotFoundError:
 
 ARQUIVO_DB_VIAGENS = "viagens.csv"
 ARQUIVO_DB_USUARIOS = "usuarios.json"
+ARQUIVO_DB_PERFIL = "perfil.json" # NOVO ARQUIVO
 ARQUIVO_ROTAS = "rotasrj.json"
 
 # --- ESTADO DE SESSÃO ---
@@ -138,11 +167,10 @@ if "form_key" not in st.session_state:
 if "limite_registros" not in st.session_state:
     st.session_state["limite_registros"] = 10 
 
-# --- FUNÇÃO DE HORÁRIO BRASIL ---
+# --- FUNÇÕES UTILITÁRIAS ---
 def agora_br():
     return datetime.utcnow() - timedelta(hours=3)
 
-# --- FUNÇÕES GERAIS ---
 def get_repo():
     g = Github(GITHUB_TOKEN)
     return g.get_repo(REPO_NAME)
@@ -171,7 +199,35 @@ def hash_senha(password):
 def verificar_senha(password, hashed):
     return bcrypt.checkpw(password.encode(), hashed.encode())
 
-# --- FUNÇÕES DE LÓGICA DO USUÁRIO ---
+# --- FUNÇÕES DE PERFIL (NOVAS) ---
+def carregar_perfil(usuario):
+    """Carrega o perfil do usuario, se nao existir, retorna padrao"""
+    db_perfil = ler_arquivo_github(ARQUIVO_DB_PERFIL, 'json')
+    if usuario in db_perfil:
+        return db_perfil[usuario]
+    else:
+        # Perfil Padrão se não existir ainda
+        return {
+            "display_name": usuario.capitalize(),
+            "bio": "Novo no BusLog!",
+            "avatar": "👤"
+        }
+
+def salvar_perfil_editado(usuario, display_name, bio, avatar):
+    db_perfil = ler_arquivo_github(ARQUIVO_DB_PERFIL, 'json')
+    
+    db_perfil[usuario] = {
+        "display_name": display_name,
+        "bio": bio,
+        "avatar": avatar,
+        "updated_at": str(agora_br())
+    }
+    
+    json_str = json.dumps(db_perfil, indent=4)
+    atualizar_arquivo_github(ARQUIVO_DB_PERFIL, json_str, f"Perfil atualizado: {usuario}")
+    return True
+
+# --- FUNÇÕES DE AUTH ---
 def registrar_usuario(usuario, senha):
     usuario = usuario.lower().strip()
     db_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
@@ -181,6 +237,10 @@ def registrar_usuario(usuario, senha):
     
     json_str = json.dumps(db_usuarios, indent=4)
     atualizar_arquivo_github(ARQUIVO_DB_USUARIOS, json_str, f"Novo usuario: {usuario}")
+    
+    # Cria perfil vazio inicial
+    salvar_perfil_editado(usuario, usuario.capitalize(), "Busólogo iniciante.", "👤")
+    
     return True, "Conta criada com sucesso!"
 
 def fazer_login(usuario, senha):
@@ -190,21 +250,14 @@ def fazer_login(usuario, senha):
         if verificar_senha(senha, db_usuarios[usuario]['password']): return True
     return False
 
-# --- FUNÇÃO DE EXCLUIR REGISTRO (NOVA) ---
 def excluir_registro(index_original):
-    """Remove a linha do CSV baseada no index original do Pandas"""
     df = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
-    
     if index_original in df.index:
         df = df.drop(index_original)
-        
-        # ORGANIZAÇÃO: Agrupa por usuário (A-Z) e depois por data (Mais recente primeiro)
-        # Isso garante que no CSV do GitHub fique tudo organizado
         if not df.empty:
             df['datetime_temp'] = pd.to_datetime(df['data'].astype(str) + ' ' + df['hora'].astype(str), errors='coerce')
             df = df.sort_values(by=['usuario', 'datetime_temp'], ascending=[True, False])
-            df = df.drop(columns=['datetime_temp']) # Remove coluna auxiliar
-            
+            df = df.drop(columns=['datetime_temp'])
         atualizar_arquivo_github(ARQUIVO_DB_VIAGENS, df.to_csv(index=False), "Registro excluído")
         return True
     return False
@@ -234,7 +287,6 @@ def carregar_rotas():
 
 rotas_db = carregar_rotas()
 lista_linhas = list(rotas_db.keys()) if rotas_db else []
-
 MESES_PT = {1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL", 5: "MAIO", 6: "JUNHO", 7: "JULHO", 8: "AGOSTO", 9: "SETEMBRO", 10: "OUTUBRO", 11: "NOVEMBRO", 12: "DEZEMBRO"}
 
 # --- INTERFACE ---
@@ -246,30 +298,26 @@ if "logado" not in st.session_state:
 
 # --- ÁREA LOGADA ---
 if st.session_state["logado"]:
+    user_atual = st.session_state["usuario_atual"]
+    
     with st.sidebar:
         st.write(f"Olá, **busólogo**!")
-        st.caption(f"Logado como: {st.session_state['usuario_atual']}")
-        
+        st.caption(f"Logado como: {user_atual}")
         if st.button("Sair do BusLog"):
             st.session_state["logado"] = False
             st.rerun()
     
-    aba1, aba2 = st.tabs(["📝 Nova Viagem", "📓 Diário"])
+    aba1, aba2, aba3 = st.tabs(["📝 Nova Viagem", "📓 Diário", "👤 Meu Perfil"])
     
     # --- ABA 1: REGISTRO ---
     with aba1:
         key_atual = st.session_state["form_key"]
-        
         with st.form(f"nova_viagem_{key_atual}"):
             c1, c2 = st.columns(2)
             data = c1.date_input("Data", agora_br(), format="DD/MM/YYYY") 
-            
-            hora_padrao = datetime_time(0, 0)
-            hora = c2.time_input("Hora", value=hora_padrao)
-            
+            hora = c2.time_input("Hora", value=datetime_time(0, 0))
             linha = st.selectbox("Linha", [""] + lista_linhas)
-            
-            st.markdown('<div class="privacy-warning">⚠ Atenção: Este diário é público. Não escreva informações pessoais.</div>', unsafe_allow_html=True)
+            st.markdown('<div class="privacy-warning">⚠ Atenção: Este diário é público.</div>', unsafe_allow_html=True)
             obs = st.text_area("Observações (Opcional)", height=68, max_chars=50)
             
             if st.form_submit_button("Salvar Viagem", use_container_width=True):
@@ -279,7 +327,7 @@ if st.session_state["logado"]:
                     with st.spinner("Salvando..."):
                         df_antigo = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
                         novo_dado = {
-                            "usuario": st.session_state['usuario_atual'], 
+                            "usuario": user_atual, 
                             "linha": linha,
                             "data": str(data),
                             "hora": str(hora)[:5],
@@ -289,16 +337,12 @@ if st.session_state["logado"]:
                         df_novo = pd.DataFrame([novo_dado])
                         df_final = pd.concat([df_antigo, df_novo], ignore_index=True)
                         
-                        # ORGANIZAÇÃO: Ordena o CSV inteiro antes de salvar
                         df_final['datetime_temp'] = pd.to_datetime(df_final['data'].astype(str) + ' ' + df_final['hora'].astype(str), errors='coerce')
-                        # Ordena por USUÁRIO (A-Z) e depois por DATA (Recente primeiro)
                         df_final = df_final.sort_values(by=['usuario', 'datetime_temp'], ascending=[True, False])
                         df_final = df_final.drop(columns=['datetime_temp'])
                         
                         atualizar_arquivo_github(ARQUIVO_DB_VIAGENS, df_final.to_csv(index=False), "Nova viagem")
-                        
                         tocar_buzina()
-                        
                         st.success("Registrado!")
                         st.session_state["form_key"] += 1 
                         time.sleep(1)
@@ -307,18 +351,13 @@ if st.session_state["logado"]:
     # --- ABA 2: HISTÓRICO ---
     with aba2:
         df = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
-        
         if not df.empty:
-            # 1. Filtra pelo usuário atual
-            df_filtered = df[df['usuario'] == st.session_state['usuario_atual']].copy()
-            
-            # 2. Cria coluna de datetime para ordenação visual
+            df_filtered = df[df['usuario'] == user_atual].copy()
             df_filtered['data'] = df_filtered['data'].astype(str)
             df_filtered['hora'] = df_filtered['hora'].astype(str)
             df_filtered['datetime_full'] = pd.to_datetime(df_filtered['data'] + ' ' + df_filtered['hora'], errors='coerce')
             df_filtered = df_filtered.dropna(subset=['datetime_full'])
             
-            # Filtros visuais
             filtro_tempo = st.pills("Período:", ["Tudo", "7 Dias", "30 Dias", "Este Ano"], default="Tudo")
             hoje = agora_br()
             
@@ -329,10 +368,8 @@ if st.session_state["logado"]:
             elif filtro_tempo == "Este Ano":
                 df_filtered = df_filtered[df_filtered['datetime_full'].dt.year == hoje.year]
             
-            # Ordenação VISUAL (do mais recente para o antigo)
             df_filtered = df_filtered.sort_values(by='datetime_full', ascending=False)
             
-            # Paginação
             total_registros = len(df_filtered)
             limite = st.session_state["limite_registros"]
             df_view = df_filtered.head(limite)
@@ -342,20 +379,14 @@ if st.session_state["logado"]:
             grupos = df_view.groupby(['ano', 'mes'], sort=False)
             
             if df_filtered.empty:
-                st.info("Nenhuma viagem válida encontrada neste período.")
+                st.info("Nenhuma viagem neste período.")
             else:
                 for (ano, mes), grupo in grupos:
                     nome_mes = MESES_PT[mes]
                     st.markdown(f"<div class='month-header'>{nome_mes} {ano}</div>", unsafe_allow_html=True)
-                    
-                    # Iterar pelo grupo (iterrows retorna o index original do CSV!)
                     for index, row in grupo.iterrows():
                         obs_texto = f" • {row['obs']}" if pd.notna(row['obs']) and row['obs'] else ""
-                        
-                        # Layout: Card + Botão Deletar
-                        # Usamos colunas: Coluna 1 (Card - 85%) | Coluna 2 (Botão - 15%)
                         col_card, col_del = st.columns([0.88, 0.12])
-                        
                         with col_card:
                             card_html = f"""
                             <div class="journal-card">
@@ -368,35 +399,88 @@ if st.session_state["logado"]:
                             </div>
                             """
                             st.markdown(card_html, unsafe_allow_html=True)
-                        
                         with col_del:
-                            # Botão de Excluir
-                            # A key precisa ser única para cada botão, usamos o index da linha
-                            if st.button("❌", key=f"del_{index}", help="Excluir este registro"):
+                            if st.button("❌", key=f"del_{index}", help="Excluir"):
                                 with st.spinner("Apagando..."):
                                     if excluir_registro(index):
                                         st.success("Apagado!")
                                         time.sleep(1)
                                         st.rerun()
-                                    else:
-                                        st.error("Erro ao apagar.")
-                
                 if total_registros > limite:
-                    st.markdown("---")
-                    col_load, _ = st.columns([1, 2])
-                    if col_load.button(f"Carregar mais antigos ({total_registros - limite} restantes)"):
+                    if st.button(f"Carregar mais ({total_registros - limite} restantes)"):
                         st.session_state["limite_registros"] += 10 
                         st.rerun()
-                elif total_registros > 10:
-                    st.caption("Você chegou ao fim do diário.")
-
         else:
-            st.info("Seu diário está vazio. Comece a catalogar!")
+            st.info("Comece a catalogar suas viagens!")
+
+    # --- ABA 3: PERFIL (NOVA) ---
+    with aba3:
+        perfil = carregar_perfil(user_atual)
+        
+        # Modo de Visualização
+        if "editando_perfil" not in st.session_state:
+            st.session_state["editando_perfil"] = False
+        
+        if not st.session_state["editando_perfil"]:
+            # HTML do Perfil Visual
+            html_perfil = f"""
+            <div class="profile-header">
+                <div class="avatar">{perfil.get('avatar', '👤')}</div>
+                <div class="display-name">{perfil.get('display_name', user_atual)}</div>
+                <div class="username-tag">@{user_atual}</div>
+                <div class="bio-text">"{perfil.get('bio', '')}"</div>
+            </div>
+            """
+            st.markdown(html_perfil, unsafe_allow_html=True)
+            
+            # ESTATÍSTICAS
+            df_viagens = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
+            if not df_viagens.empty:
+                meus_dados = df_viagens[df_viagens['usuario'] == user_atual]
+                total = len(meus_dados)
+                linha_fav = meus_dados['linha'].mode()[0] if not meus_dados.empty else "-"
+                
+                k1, k2 = st.columns(2)
+                k1.metric("Total de Viagens", total)
+                k2.metric("Linha Favorita", linha_fav)
+            else:
+                st.info("Faça viagens para gerar estatísticas!")
+
+            if st.button("Editar Perfil"):
+                st.session_state["editando_perfil"] = True
+                st.rerun()
+        
+        else:
+            # Modo de Edição
+            with st.form("form_perfil"):
+                st.write("### Editando Perfil")
+                novo_nome = st.text_input("Nome de Exibição", value=perfil.get('display_name', ''))
+                nova_bio = st.text_area("Bio (Frase curta)", value=perfil.get('bio', ''), max_chars=100)
+                
+                # Seletor de Avatar (Emojis)
+                opcoes_avatar = ["👤", "🚌", "🚍", "🚏", "🎫", "😎", "🤠", "👽", "👾", "🤖", "🐱", "🐶"]
+                idx_atual = 0
+                if perfil.get('avatar') in opcoes_avatar:
+                    idx_atual = opcoes_avatar.index(perfil.get('avatar'))
+                novo_avatar = st.selectbox("Escolha um Avatar", opcoes_avatar, index=idx_atual)
+                
+                c_salvar, c_cancelar = st.columns(2)
+                with c_salvar:
+                    if st.form_submit_button("Salvar Alterações", use_container_width=True):
+                        if salvar_perfil_editado(user_atual, novo_nome, nova_bio, novo_avatar):
+                            st.success("Perfil atualizado!")
+                            st.session_state["editando_perfil"] = False
+                            time.sleep(1)
+                            st.rerun()
+                
+                with c_cancelar:
+                     if st.form_submit_button("Cancelar", use_container_width=True):
+                         st.session_state["editando_perfil"] = False
+                         st.rerun()
 
 # --- LOGIN / CADASTRO ---
 else:
     tab_login, tab_cadastro = st.tabs(["Entrar", "Criar Conta"])
-    
     with tab_login:
         l_user = st.text_input("Usuário")
         l_pass = st.text_input("Senha", type="password")
@@ -411,24 +495,16 @@ else:
 
     with tab_cadastro:
         st.write("### Criar Nova Conta")
-        
-        st.warning("⚠ **IMPORTANTE:** Anote sua senha em um local seguro! Como não coletamos e-mail por privacidade, **é impossível recuperar a conta** caso você a perca.")
-        
+        st.warning("⚠ **IMPORTANTE:** Anote sua senha! Impossível recuperar.")
         c_user = st.text_input("Escolha um Usuário")
         c_pass = st.text_input("Escolha uma Senha", type="password", key="reg_pass")
         c_pass2 = st.text_input("Confirme a Senha", type="password", key="reg_pass2")
-        
         if st.button("CRIAR CONTA", use_container_width=True):
-            if c_pass != c_pass2:
-                st.error("Senhas não batem!")
-            elif len(c_pass) < 4:
-                st.error("Senha curta demais!")
-            elif not c_user:
-                st.error("Digite um usuário!")
+            if c_pass != c_pass2: st.error("Senhas não batem!")
+            elif len(c_pass) < 4: st.error("Senha curta!")
+            elif not c_user: st.error("Digite um usuário!")
             else:
                 with st.spinner("Criando..."):
                     sucesso, msg = registrar_usuario(c_user, c_pass)
-                    if sucesso:
-                        st.success(msg)
-                    else:
-                        st.error(msg)
+                    if sucesso: st.success(msg)
+                    else: st.error(msg)
