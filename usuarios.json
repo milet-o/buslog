@@ -2,5 +2,9 @@
     "felipe": {
         "password": "$2b$12$aEAk93fqH.ohczIvQ7gxg.SNmM2FXcllF1EtD1Wh/6ycfPUwPVLyO",
         "created_at": "2026-01-09 23:05:52.448202"
+    },
+    "Maria": {
+        "password": "$2b$12$7pE7iq.2hUkA2S/5n1I3ku0VKidtvc5GDD29HKwbDJ6ZfO6osGXH6",
+        "created_at": "2026-01-09 21:24:59.474908"
     }
 }
