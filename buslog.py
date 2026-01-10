@@ -79,6 +79,11 @@ st.markdown("""
     .stat-label { font-size: 11px; color: #888; text-transform: uppercase; margin-bottom: 5px; }
     .stat-value { font-size: 20px; font-weight: bold; color: #fff; }
     .stat-value-small { font-size: 14px; font-weight: bold; color: #fff; word-wrap: break-word; line-height: 1.2; }
+    
+    /* RESULTADOS DA BUSCA (Botões) */
+    div[data-testid="stVerticalBlock"] > div > button {
+        text-align: left;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -210,7 +215,7 @@ def registrar_usuario(usuario, senha):
     json_str = json.dumps(db_usuarios, indent=4)
     atualizar_arquivo_github(ARQUIVO_DB_USUARIOS, json_str, f"Novo usuario: {usuario}")
     salvar_perfil_editado(usuario, usuario.capitalize(), "Busólogo iniciante.", "👤")
-    return True, "Conta criada!"
+    return True, "Conta criada com sucesso!"
 
 def fazer_login(usuario, senha):
     usuario = usuario.lower().strip()
@@ -252,8 +257,7 @@ rotas_db = carregar_rotas()
 lista_linhas = list(rotas_db.keys()) if rotas_db else []
 MESES_PT = {1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL", 5: "MAIO", 6: "JUNHO", 7: "JULHO", 8: "AGOSTO", 9: "SETEMBRO", 10: "OUTUBRO", 11: "NOVEMBRO", 12: "DEZEMBRO"}
 
-# --- INTERFACE ---
-st.title("🚌 BusLog")
+# --- INTERFACE GLOBAL ---
 
 if "logado" not in st.session_state:
     st.session_state["logado"] = False
@@ -263,32 +267,41 @@ if "logado" not in st.session_state:
 if st.session_state["logado"]:
     meu_user = st.session_state["usuario_atual"]
     
-    # SIDEBAR: Busca e Menu
+    # --- HEADER GLOBAL (Título + Pesquisa) ---
+    col_titulo, col_pesquisa = st.columns([0.65, 0.35])
+    
+    with col_titulo:
+        st.title("🚌 BusLog")
+    
+    with col_pesquisa:
+        # Espaçamento para alinhar com o título
+        st.write("") 
+        st.write("")
+        termo_busca = st.text_input("🔍 Buscar Busólogo", placeholder="Nome ou user...", label_visibility="collapsed").lower().strip()
+    
+    # LOGICA DE EXIBIÇÃO DE RESULTADOS DA BUSCA (Aparece logo abaixo se tiver busca)
+    if termo_busca:
+        db_perfis = ler_arquivo_github(ARQUIVO_DB_PERFIL, 'json')
+        # Busca no user (chave) e no display_name
+        resultados = [u for u in db_perfis.keys() if termo_busca in u or termo_busca in db_perfis[u].get('display_name', '').lower()]
+        
+        if resultados:
+            st.caption(f"Resultados para '{termo_busca}':")
+            cols_res = st.columns(min(len(resultados), 4)) # Mostra até 4 por linha ou lista
+            for i, res in enumerate(resultados):
+                # Cria um botão para cada resultado
+                label_res = f"{db_perfis[res].get('display_name', res)} (@{res})"
+                if st.button(f"👤 {label_res}", key=f"top_search_{res}", use_container_width=True):
+                    st.session_state["perfil_visitado"] = res
+                    st.rerun()
+        else:
+            st.caption("Nenhum busólogo encontrado.")
+        st.markdown("---")
+
+    # SIDEBAR MINIMALISTA
     with st.sidebar:
         st.write(f"Olá, **busólogo**!")
         st.caption(f"Logado como: @{meu_user}")
-        
-        st.markdown("---")
-        st.write("🔍 **Buscar Usuário**")
-        termo_busca = st.text_input("Digite o nome:", placeholder="Ex: maria").lower().strip()
-        
-        # Lógica de Busca (Sempre ativa)
-        if termo_busca:
-            db_perfis = ler_arquivo_github(ARQUIVO_DB_PERFIL, 'json')
-            # Busca nas chaves (user) e no display name
-            resultados = [u for u in db_perfis.keys() if termo_busca in u or termo_busca in db_perfis[u].get('display_name', '').lower()]
-            
-            if resultados:
-                st.caption(f"{len(resultados)} encontrados:")
-                for res in resultados:
-                    # Botão para visitar
-                    if st.button(f"👤 {db_perfis[res].get('display_name', res)}", key=f"btn_search_{res}", use_container_width=True):
-                        st.session_state["perfil_visitado"] = res
-                        st.rerun()
-            else:
-                st.warning("Ninguém encontrado.")
-        
-        st.markdown("---")
         if st.button("🏠 Início", use_container_width=True):
             st.session_state["perfil_visitado"] = None
             st.rerun()
@@ -301,24 +314,25 @@ if st.session_state["logado"]:
         visitado = st.session_state["perfil_visitado"]
         dados_perfil = carregar_perfil(visitado)
         
-        # Header Visitante
-        if st.button("⬅ Voltar ao Início"):
-            st.session_state["perfil_visitado"] = None
-            st.rerun()
-            
         social_db = carregar_social()
         seguindo_lista = social_db.get(meu_user, [])
         eh_seguido = visitado in seguindo_lista
         
-        # Botão Seguir (Só se não for eu mesmo)
-        if visitado != meu_user:
-            btn_txt = "Deixar de Seguir" if eh_seguido else "Seguir"
-            btn_type = "primary" if not eh_seguido else "secondary"
-            if st.button(btn_txt, type=btn_type, use_container_width=True):
-                with st.spinner("Atualizando social..."):
-                    if eh_seguido: deixar_seguir(meu_user, visitado)
-                    else: seguir_usuario(meu_user, visitado)
-                    st.rerun()
+        # Header Visitante
+        c_v1, c_v2 = st.columns([1, 4])
+        with c_v1:
+            if st.button("⬅ Voltar"):
+                st.session_state["perfil_visitado"] = None
+                st.rerun()
+        with c_v2:
+            if visitado != meu_user:
+                btn_txt = "Deixar de Seguir" if eh_seguido else "Seguir"
+                btn_type = "primary" if not eh_seguido else "secondary"
+                if st.button(btn_txt, type=btn_type):
+                    with st.spinner("..."):
+                        if eh_seguido: deixar_seguir(meu_user, visitado)
+                        else: seguir_usuario(meu_user, visitado)
+                        st.rerun()
 
         st.markdown(f"""
         <div class="profile-header">
@@ -370,9 +384,9 @@ if st.session_state["logado"]:
                 quem_sigo = social_db.get(meu_user, [])
                 
                 if not quem_sigo:
-                    st.info("Você não segue ninguém ainda. Use a busca na lateral!")
+                    st.info("Siga amigos para ver atividades!")
                 else:
-                    # FILTRO CORRIGIDO: Exclui meu_user, mostra só quem sigo
+                    # FEED: Apenas quem eu sigo (exclui eu mesmo)
                     df_feed = df_viagens[df_viagens['usuario'].isin(quem_sigo)].copy()
                     feed_items = agrupar_viagens_atividade(df_feed)
                     
@@ -382,7 +396,6 @@ if st.session_state["logado"]:
                         for item in feed_items:
                             u, viags = item['usuario'], item['viagens']
                             perf = db_perfis.get(u, {})
-                            # Card Feed
                             with st.container():
                                 st.markdown(f"""
                                 <div class="activity-card">
@@ -487,6 +500,7 @@ if st.session_state["logado"]:
                         with st.spinner("Salvando..."): salvar_perfil_editado(meu_user, nn, nb, na); st.session_state["edit_p"]=False; st.rerun()
                     if c2.form_submit_button("Cancelar"): st.session_state["edit_p"]=False; st.rerun()
 
+# --- LOGIN / CADASTRO (IGUAL) ---
 else:
     tab1, tab2 = st.tabs(["Entrar", "Criar Conta"])
     with tab1:
