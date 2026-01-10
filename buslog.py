@@ -15,15 +15,17 @@ st.set_page_config(page_title="BusLog", page_icon="🚌", layout="centered")
 # --- CSS PERSONALIZADO ---
 st.markdown("""
     <style>
-    /* TEXTOS E FUNDO */
+    /* TEXTOS CLAROS */
     h1, h2, h3, h4, h5, h6, p, span, label, .stMarkdown, .stText, div[data-testid="stMetricValue"] { color: #e0e0e0 !important; }
     .stTextInput > label, .stSelectbox > label, .stDateInput > label, .stTimeInput > label, .stTextArea > label { color: #e0e0e0 !important; }
     
+    /* FUNDO */
     .stApp {
         background-color: #0e1117;
         background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
         background-attachment: fixed;
     }
+    
     [data-testid="InputInstructions"] { display: none; }
     
     /* HEADER MÊS */
@@ -60,7 +62,6 @@ st.markdown("""
     }
 
     /* FORÇAR CORES DOS BOTÕES DE SEGUIR */
-    /* Botão Primário (Seguir) -> Azul */
     button[kind="primary"] {
         background-color: #007bff !important;
         border-color: #007bff !important;
@@ -71,13 +72,11 @@ st.markdown("""
         border-color: #0056b3 !important;
     }
     
-    /* Botão Secundário (Deixar de Seguir/Voltar) -> Vermelho/Cinza */
     button[kind="secondary"] {
         background-color: transparent !important;
         border: 1px solid #555 !important;
         color: #eee !important;
     }
-    /* Classe específica para botão de unfollow (precisa ser aplicada no python via key ou contexto se possível, mas aqui usamos o generico secondary) */
     
     .stat-box { background-color: #262730; padding: 10px; border-radius: 6px; text-align: center; border: 1px solid #333; height: 100%; display: flex; flex-direction: column; justify-content: center; }
     .stat-label { font-size: 11px; color: #888; text-transform: uppercase; margin-bottom: 5px; }
@@ -100,14 +99,14 @@ ARQUIVO_DB_VIAGENS = "viagens.csv"
 ARQUIVO_DB_USUARIOS = "usuarios.json"
 ARQUIVO_DB_PERFIL = "perfil.json"
 ARQUIVO_DB_SOCIAL = "social.json"
-ARQUIVO_DB_NOTIFICACOES = "notificacoes.json" # NOVO
+ARQUIVO_DB_NOTIFICACOES = "notificacoes.json"
 ARQUIVO_ROTAS = "rotasrj.json"
 
 # --- ESTADO DE SESSÃO & CACHE LOCAL ---
 if "form_key" not in st.session_state: st.session_state["form_key"] = 0
 if "limite_registros" not in st.session_state: st.session_state["limite_registros"] = 10
 if "perfil_visitado" not in st.session_state: st.session_state["perfil_visitado"] = None
-if "ver_lista_seguidores" not in st.session_state: st.session_state["ver_lista_seguidores"] = None # 'seguidores' ou 'seguindo'
+if "ver_lista_seguidores" not in st.session_state: st.session_state["ver_lista_seguidores"] = None
 
 if "cache_viagens" not in st.session_state: st.session_state["cache_viagens"] = pd.DataFrame()
 if "dados_carregados" not in st.session_state: st.session_state["dados_carregados"] = False
@@ -147,7 +146,7 @@ def sincronizar_dados():
 
 if not st.session_state["dados_carregados"]: sincronizar_dados()
 
-# --- NOTIFICAÇÕES (NOVO) ---
+# --- NOTIFICAÇÕES ---
 def carregar_notificacoes():
     return ler_arquivo_github(ARQUIVO_DB_NOTIFICACOES, 'json')
 
@@ -156,13 +155,11 @@ def salvar_notificacoes(dados):
     atualizar_arquivo_github(ARQUIVO_DB_NOTIFICACOES, json_str, "Notif update")
 
 def adicionar_notificacao(target_user, from_user, tipo="follow"):
-    # Não notifica se for eu mesmo (bug safety)
     if target_user == from_user: return
     
     dados = carregar_notificacoes()
     if target_user not in dados: dados[target_user] = []
     
-    # Evita spam: se já tem notificação não lida desse usuario, não adiciona outra
     existe = False
     for n in dados[target_user]:
         if n['from_user'] == from_user and n['type'] == tipo and not n.get('read', False):
@@ -200,8 +197,6 @@ def seguir_usuario(eu, outro):
     if outro not in dados[eu]:
         dados[eu].append(outro)
         salvar_social(dados)
-        
-        # Gera Notificação
         t = threading.Thread(target=adicionar_notificacao, args=(outro, eu, "follow"))
         t.start()
         return True
@@ -219,7 +214,7 @@ def get_seguidores_count(usuario):
     dados = carregar_social()
     seguidores = [u for u, lista in dados.items() if usuario in lista]
     seguindo = dados.get(usuario, [])
-    return seguidores, seguindo # Retorna LISTAS agora, não só numeros
+    return seguidores, seguindo
 
 def carregar_perfil(usuario):
     db_perfil = ler_arquivo_github(ARQUIVO_DB_PERFIL, 'json')
@@ -300,9 +295,14 @@ def tocar_buzina():
 @st.cache_data
 def carregar_rotas():
     try:
-        try: with open(ARQUIVO_ROTAS, "r", encoding="utf-8") as f: return json.load(f)
-        except: return ler_arquivo_github(ARQUIVO_ROTAS, 'json')
-    except: return {}
+        # AQUI FOI A CORREÇÃO:
+        try:
+            with open(ARQUIVO_ROTAS, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return ler_arquivo_github(ARQUIVO_ROTAS, 'json')
+    except:
+        return {}
 
 rotas_db = carregar_rotas()
 lista_linhas = list(rotas_db.keys()) if rotas_db else []
@@ -354,11 +354,7 @@ if st.session_state["logado"]:
         social_db = carregar_social()
         
         lista_seguidores, lista_seguindo = get_seguidores_count(visitado)
-        
-        # Verifica se segue você
         segue_voce = meu_user in lista_seguindo
-        
-        # Verifica se eu sigo ele
         eh_seguido = visitado in social_db.get(meu_user, [])
         
         # Header (Nome e Badge)
@@ -372,10 +368,8 @@ if st.session_state["logado"]:
         </div>
         """, unsafe_allow_html=True)
         
-        # Botão de Ação (Direita)
         c_v1, c_v2 = st.columns([2, 1])
         with c_v1:
-            # Lista de Seguidores/Seguindo (Clicável)
             if st.session_state["ver_lista_seguidores"]:
                 tipo_lista = st.session_state["ver_lista_seguidores"]
                 lista_exibir = lista_seguidores if tipo_lista == 'seguidores' else lista_seguindo
@@ -385,22 +379,14 @@ if st.session_state["logado"]:
                         st.session_state["perfil_visitado"] = u
                         st.session_state["ver_lista_seguidores"] = None
                         st.rerun()
-                if st.button("Fechar Lista"):
-                    st.session_state["ver_lista_seguidores"] = None
-                    st.rerun()
+                if st.button("Fechar Lista"): st.session_state["ver_lista_seguidores"] = None; st.rerun()
             else:
                 c_s1, c_s2 = st.columns(2)
-                if c_s1.button(f"Seguidores: {len(lista_seguidores)}"):
-                    st.session_state["ver_lista_seguidores"] = "seguidores"
-                    st.rerun()
-                if c_s2.button(f"Seguindo: {len(lista_seguindo)}"):
-                    st.session_state["ver_lista_seguidores"] = "seguindo"
-                    st.rerun()
+                if c_s1.button(f"Seguidores: {len(lista_seguidores)}"): st.session_state["ver_lista_seguidores"] = "seguidores"; st.rerun()
+                if c_s2.button(f"Seguindo: {len(lista_seguindo)}"): st.session_state["ver_lista_seguidores"] = "seguindo"; st.rerun()
 
         with c_v2:
             if visitado != meu_user:
-                # BOTÃO AZUL (Primary) para SEGUIR
-                # BOTÃO VERMELHO (Secondary, via CSS) para DEIXAR DE SEGUIR
                 if eh_seguido:
                     if st.button("Deixar de Seguir", type="secondary", use_container_width=True):
                         deixar_seguir(meu_user, visitado); st.rerun()
@@ -412,7 +398,6 @@ if st.session_state["logado"]:
                     st.session_state["perfil_visitado"] = None; st.rerun()
 
         st.write(""); st.markdown("### 📓 Diário Público")
-        # Mostra viagens (mesmo codigo de antes)
         df_viagens = st.session_state["cache_viagens"]
         if not df_viagens.empty:
             dv = df_viagens[df_viagens['usuario'] == visitado]
@@ -427,7 +412,6 @@ if st.session_state["logado"]:
 
     # --- MODO PRINCIPAL ---
     else:
-        # CONTA NOTIFICAÇÕES
         db_notif = carregar_notificacoes()
         minhas_notifs = db_notif.get(meu_user, [])
         nao_lidas = sum(1 for n in minhas_notifs if not n['read'])
@@ -486,7 +470,6 @@ if st.session_state["logado"]:
                         st.success("Salvo!"); st.session_state["form_key"]+=1; time.sleep(0.5); st.rerun()
 
         with aba_diario:
-            # LENDO DO CACHE
             df = st.session_state["cache_viagens"]
             if not df.empty:
                 dff = df[df['usuario'] == meu_user].copy()
@@ -509,36 +492,25 @@ if st.session_state["logado"]:
                             o = f" • {r['obs']}" if pd.notna(r['obs']) and r['obs'] else ""
                             c1, c2 = st.columns([0.88, 0.12])
                             c1.markdown(f"""<div class="journal-card"><div class="strip"></div><div class="date-col">{r['dt'].day}</div><div class="info-col"><div class="bus-line">{r['linha']}</div><div class="meta-info">🕒 {str(r['hora'])[:5]}{o}</div></div></div>""", unsafe_allow_html=True)
-                            
-                            # DELETE OTIMIZADO
                             if c2.button("❌", key=f"d_{i}"):
-                                excluir_registro_rapido(i)
-                                st.rerun() # RERUN IMEDIATO
-                                
+                                excluir_registro_rapido(i); st.rerun()
                     if len(dff) > lim:
                         if st.button("Carregar +"): st.session_state["limite_registros"]+=10; st.rerun()
             else: st.info("Vazio.")
 
-        # --- ABA NOTIFICAÇÕES (NOVA) ---
         with aba_notif:
             if nao_lidas > 0:
-                if st.button("Marcar todas como lidas"):
-                    marcar_todas_lidas(meu_user)
-                    st.rerun()
-            
-            if not minhas_notifs:
-                st.info("Nenhuma notificação.")
+                if st.button("Marcar todas como lidas"): marcar_todas_lidas(meu_user); st.rerun()
+            if not minhas_notifs: st.info("Nenhuma notificação.")
             else:
                 for notif in minhas_notifs:
                     lida_icon = "🟢" if not notif['read'] else "⚪"
                     msg = f"**{notif['from_user']}** começou a te seguir."
-                    
                     with st.container():
                         c_n1, c_n2 = st.columns([0.8, 0.2])
                         c_n1.write(f"{lida_icon} {msg}")
                         if c_n2.button("Ver", key=f"not_{notif['from_user']}_{notif['timestamp']}"):
-                            st.session_state["perfil_visitado"] = notif['from_user']
-                            st.rerun()
+                            st.session_state["perfil_visitado"] = notif['from_user']; st.rerun()
                         st.markdown("---")
 
         with aba_perfil:
@@ -550,7 +522,6 @@ if st.session_state["logado"]:
             if not st.session_state["edit_p"]:
                 st.markdown(f"""<div class="profile-header"><div class="avatar">{p.get('avatar','👤')}</div><div class="display-name">{p.get('display_name', meu_user)}</div><div class="username-tag">@{meu_user}</div><div class="bio-text">"{p.get('bio','')}"</div></div>""", unsafe_allow_html=True)
                 
-                # LISTAS CLICÁVEIS NO MEU PERFIL TAMBÉM
                 if st.session_state["ver_lista_seguidores"]:
                     tipo_lista = st.session_state["ver_lista_seguidores"]
                     lista_exibir = lista_seguidores if tipo_lista == 'seguidores' else lista_seguindo
@@ -560,17 +531,11 @@ if st.session_state["logado"]:
                             st.session_state["perfil_visitado"] = u
                             st.session_state["ver_lista_seguidores"] = None
                             st.rerun()
-                    if st.button("Fechar Lista", key="fechar_minha"):
-                        st.session_state["ver_lista_seguidores"] = None
-                        st.rerun()
+                    if st.button("Fechar Lista", key="fechar_minha"): st.session_state["ver_lista_seguidores"] = None; st.rerun()
                 else:
                     c1, c2, c3, c4 = st.columns(4)
-                    if c1.button(f"Seguidores: {len(lista_seguidores)}", key="meus_segs"):
-                        st.session_state["ver_lista_seguidores"] = "seguidores"
-                        st.rerun()
-                    if c2.button(f"Seguindo: {len(lista_seguindo)}", key="meus_segd"):
-                        st.session_state["ver_lista_seguidores"] = "seguindo"
-                        st.rerun()
+                    if c1.button(f"Seguidores: {len(lista_seguidores)}", key="meus_segs"): st.session_state["ver_lista_seguidores"] = "seguidores"; st.rerun()
+                    if c2.button(f"Seguindo: {len(lista_seguindo)}", key="meus_segd"): st.session_state["ver_lista_seguidores"] = "seguindo"; st.rerun()
                     
                     dfv = st.session_state["cache_viagens"]
                     tot, fav = 0, "-"
@@ -578,7 +543,6 @@ if st.session_state["logado"]:
                         dm = dfv[dfv['usuario']==meu_user]
                         tot = len(dm)
                         if not dm.empty: fav = dm['linha'].mode()[0]
-                    
                     c3.markdown(f"<div class='stat-box'><div class='stat-label'>Viagens</div><div class='stat-value'>{tot}</div></div>", unsafe_allow_html=True)
                     c4.markdown(f"<div class='stat-box'><div class='stat-label'>Linha Fav.</div><div class='stat-value-small'>{fav}</div></div>", unsafe_allow_html=True)
                     
