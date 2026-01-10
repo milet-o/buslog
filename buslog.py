@@ -1,7 +1,7 @@
 import streamlit as st
 import json
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as datetime_time
 from github import Github
 import io
 import time
@@ -11,23 +11,32 @@ import base64
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(page_title="BusLog", page_icon="🚌", layout="centered")
 
-# --- CSS PERSONALIZADO ---
+# --- CSS PERSONALIZADO (CORRIGIDO PARA MODO CLARO/ESCURO) ---
 st.markdown("""
     <style>
-    /* 1. FUNDO GRANULADO */
+    /* 1. FORÇAR TEXTOS CLAROS (Para não bugar no Modo Claro do navegador) */
+    h1, h2, h3, h4, h5, h6, p, span, label, .stMarkdown {
+        color: #e0e0e0 !important;
+    }
+    .stTextInput > label, .stSelectbox > label, .stDateInput > label, .stTimeInput > label, .stTextArea > label {
+        color: #e0e0e0 !important;
+    }
+    
+    /* 2. FUNDO GRANULADO ESCURO FIXO */
     .stApp {
         background-color: #0e1117;
         background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
+        background-attachment: fixed;
     }
     
-    /* 2. ESCONDER DICAS DO STREAMLIT */
+    /* 3. ESCONDER DICAS DO STREAMLIT */
     [data-testid="InputInstructions"] { display: none; }
     
-    /* 3. HEADER DO MÊS */
+    /* 4. HEADER DO MÊS */
     .month-header {
         font-size: 16px;
         font-weight: 600;
-        color: #666;
+        color: #aaa !important; /* Mais claro para contraste */
         margin-top: 30px;
         margin-bottom: 10px;
         text-transform: uppercase;
@@ -36,7 +45,7 @@ st.markdown("""
         padding-bottom: 5px;
     }
 
-    /* 4. CARD DA VIAGEM */
+    /* 5. CARD DA VIAGEM */
     .journal-card {
         display: flex;
         background-color: #1c1c1e;
@@ -54,14 +63,14 @@ st.markdown("""
         background-color: #252528;
     }
 
-    /* 5. FAIXA VERTICAL */
+    /* 6. FAIXA VERTICAL */
     .strip {
         width: 5px;
         background-color: #FF4B4B;
         flex-shrink: 0; 
     }
 
-    /* 6. DATA */
+    /* 7. DATA */
     .date-col {
         width: 60px;
         display: flex;
@@ -69,11 +78,11 @@ st.markdown("""
         justify-content: center;
         font-size: 24px;
         font-weight: 400;
-        color: #eee;
+        color: #eee !important;
         flex-shrink: 0; 
     }
 
-    /* 7. CONTEÚDO */
+    /* 8. CONTEÚDO */
     .info-col {
         flex-grow: 1;
         padding: 10px 15px;
@@ -85,24 +94,24 @@ st.markdown("""
     .bus-line {
         font-size: 17px;
         font-weight: 700;
-        color: #fff;
+        color: #fff !important;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis; 
     }
     .meta-info {
         font-size: 13px;
-        color: #888;
+        color: #aaa !important;
         margin-top: 4px;
         word-wrap: break-word; 
         overflow-wrap: break-word;
         line-height: 1.4;
     }
     
-    /* 8. AVISO DE PRIVACIDADE */
+    /* 9. AVISO DE PRIVACIDADE */
     .privacy-warning {
         font-size: 12px;
-        color: #ff6c6c;
+        color: #ff6c6c !important;
         margin-bottom: 5px;
         font-weight: 500;
     }
@@ -172,15 +181,12 @@ def fazer_login(usuario, senha):
         if verificar_senha(senha, db_usuarios[usuario]['password']): return True
     return False
 
-# --- FUNÇÃO DE ÁUDIO CORRIGIDA PARA M4A ---
 def tocar_buzina():
-    """Lê o arquivo bushorn.m4a e toca no navegador"""
-    arquivo_som = "bushorn.m4a" # NOME CORRIGIDO
+    arquivo_som = "bushorn.m4a"
     try:
         with open(arquivo_som, "rb") as f:
             data = f.read()
             b64 = base64.b64encode(data).decode()
-            # TIPO CORRIGIDO PARA audio/mp4 (que é o padrão do m4a)
             md = f"""
                 <audio autoplay>
                 <source src="data:audio/mp4;base64,{b64}" type="audio/mp4">
@@ -213,7 +219,10 @@ if "logado" not in st.session_state:
 # --- ÁREA LOGADA ---
 if st.session_state["logado"]:
     with st.sidebar:
-        st.write(f"Logado como: **{st.session_state['usuario_atual']}**")
+        # SAUDAÇÃO ALTERADA
+        st.write(f"Olá, **busólogo**!")
+        st.caption(f"Logado como: {st.session_state['usuario_atual']}")
+        
         if st.button("Sair do BusLog"):
             st.session_state["logado"] = False
             st.rerun()
@@ -227,7 +236,11 @@ if st.session_state["logado"]:
         with st.form(f"nova_viagem_{key_atual}"):
             c1, c2 = st.columns(2)
             data = c1.date_input("Data", datetime.now(), format="DD/MM/YYYY") 
-            hora = c2.time_input("Hora", datetime.now())
+            
+            # HORA FIXA EM 00:00
+            hora_padrao = datetime_time(0, 0)
+            hora = c2.time_input("Hora", value=hora_padrao)
+            
             linha = st.selectbox("Linha", [""] + lista_linhas)
             
             st.markdown('<div class="privacy-warning">⚠ Atenção: Este diário é público. Não escreva informações pessoais.</div>', unsafe_allow_html=True)
@@ -251,7 +264,7 @@ if st.session_state["logado"]:
                         df_final = pd.concat([df_antigo, df_novo], ignore_index=True)
                         atualizar_arquivo_github(ARQUIVO_DB_VIAGENS, df_final.to_csv(index=False), "Nova viagem")
                         
-                        tocar_buzina() # TOCA O SOM
+                        tocar_buzina()
                         
                         st.success("Registrado!")
                         st.session_state["form_key"] += 1 
@@ -342,6 +355,10 @@ else:
 
     with tab_cadastro:
         st.write("### Criar Nova Conta")
+        
+        # AVISO IMPORTANTE DE SENHA
+        st.warning("⚠ **IMPORTANTE:** Anote sua senha em um local seguro! Como não coletamos e-mail por privacidade, **é impossível recuperar a conta** caso você a perca.")
+        
         c_user = st.text_input("Escolha um Usuário")
         c_pass = st.text_input("Escolha uma Senha", type="password", key="reg_pass")
         c_pass2 = st.text_input("Confirme a Senha", type="password", key="reg_pass2")
