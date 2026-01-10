@@ -132,12 +132,11 @@ if "form_key" not in st.session_state:
 if "limite_registros" not in st.session_state:
     st.session_state["limite_registros"] = 10 
 
-# --- FUNÇÃO DE HORÁRIO BRASIL (CORREÇÃO DE FUSO) ---
+# --- FUNÇÃO DE HORÁRIO BRASIL ---
 def agora_br():
-    # Pega hora UTC e subtrai 3 horas (Brasília)
     return datetime.utcnow() - timedelta(hours=3)
 
-# --- FUNÇÕES ---
+# --- FUNÇÕES GERAIS ---
 def get_repo():
     g = Github(GITHUB_TOKEN)
     return g.get_repo(REPO_NAME)
@@ -166,7 +165,11 @@ def hash_senha(password):
 def verificar_senha(password, hashed):
     return bcrypt.checkpw(password.encode(), hashed.encode())
 
+# --- REGISTRO BLINDADO (LOWERCASE) ---
 def registrar_usuario(usuario, senha):
+    # BLINDAGEM: Transforma em minúsculo e tira espaços
+    usuario = usuario.lower().strip()
+    
     db_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
     if usuario in db_usuarios: return False, "Usuário já existe!"
     
@@ -176,7 +179,11 @@ def registrar_usuario(usuario, senha):
     atualizar_arquivo_github(ARQUIVO_DB_USUARIOS, json_str, f"Novo usuario: {usuario}")
     return True, "Conta criada com sucesso!"
 
+# --- LOGIN BLINDADO (LOWERCASE) ---
 def fazer_login(usuario, senha):
+    # BLINDAGEM: Transforma em minúsculo e tira espaços
+    usuario = usuario.lower().strip()
+    
     db_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
     if usuario in db_usuarios:
         if verificar_senha(senha, db_usuarios[usuario]['password']): return True
@@ -235,11 +242,8 @@ if st.session_state["logado"]:
         
         with st.form(f"nova_viagem_{key_atual}"):
             c1, c2 = st.columns(2)
-            
-            # DATA CORRIGIDA (Brasília UTC-3)
             data = c1.date_input("Data", agora_br(), format="DD/MM/YYYY") 
             
-            # HORA FIXA EM 00:00 (Como você pediu)
             hora_padrao = datetime_time(0, 0)
             hora = c2.time_input("Hora", value=hora_padrao)
             
@@ -260,7 +264,7 @@ if st.session_state["logado"]:
                             "data": str(data),
                             "hora": str(hora)[:5],
                             "obs": obs,
-                            "timestamp": str(agora_br()) # TIMESTAMP UTC-3
+                            "timestamp": str(agora_br())
                         }
                         df_novo = pd.DataFrame([novo_dado])
                         df_final = pd.concat([df_antigo, df_novo], ignore_index=True)
@@ -287,7 +291,6 @@ if st.session_state["logado"]:
             
             filtro_tempo = st.pills("Período:", ["Tudo", "7 Dias", "30 Dias", "Este Ano"], default="Tudo")
             
-            # Comparação sempre com horário Brasil
             hoje = agora_br()
             if filtro_tempo == "7 Dias":
                 df = df[df['datetime_full'] >= (hoje - timedelta(days=7))]
@@ -351,7 +354,8 @@ else:
             with st.spinner("Entrando..."):
                 if fazer_login(l_user, l_pass):
                     st.session_state["logado"] = True
-                    st.session_state["usuario_atual"] = l_user
+                    # GARANTIA FINAL: Salva na sessão em minúsculo também
+                    st.session_state["usuario_atual"] = l_user.lower().strip()
                     st.rerun()
                 else:
                     st.error("Dados incorretos.")
