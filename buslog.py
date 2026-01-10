@@ -11,32 +11,28 @@ import base64
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(page_title="BusLog", page_icon="🚌", layout="centered")
 
-# --- CSS PERSONALIZADO (CORRIGIDO PARA MODO CLARO/ESCURO) ---
+# --- CSS PERSONALIZADO ---
 st.markdown("""
     <style>
-    /* 1. FORÇAR TEXTOS CLAROS (Para não bugar no Modo Claro do navegador) */
-    h1, h2, h3, h4, h5, h6, p, span, label, .stMarkdown {
-        color: #e0e0e0 !important;
-    }
-    .stTextInput > label, .stSelectbox > label, .stDateInput > label, .stTimeInput > label, .stTextArea > label {
-        color: #e0e0e0 !important;
-    }
+    /* 1. FORÇAR TEXTOS CLAROS */
+    h1, h2, h3, h4, h5, h6, p, span, label, .stMarkdown { color: #e0e0e0 !important; }
+    .stTextInput > label, .stSelectbox > label, .stDateInput > label, .stTimeInput > label, .stTextArea > label { color: #e0e0e0 !important; }
     
-    /* 2. FUNDO GRANULADO ESCURO FIXO */
+    /* 2. FUNDO GRANULADO */
     .stApp {
         background-color: #0e1117;
         background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
         background-attachment: fixed;
     }
     
-    /* 3. ESCONDER DICAS DO STREAMLIT */
+    /* 3. ESCONDER DICAS */
     [data-testid="InputInstructions"] { display: none; }
     
     /* 4. HEADER DO MÊS */
     .month-header {
         font-size: 16px;
         font-weight: 600;
-        color: #aaa !important; /* Mais claro para contraste */
+        color: #aaa !important;
         margin-top: 30px;
         margin-bottom: 10px;
         text-transform: uppercase;
@@ -108,7 +104,7 @@ st.markdown("""
         line-height: 1.4;
     }
     
-    /* 9. AVISO DE PRIVACIDADE */
+    /* 9. AVISO */
     .privacy-warning {
         font-size: 12px;
         color: #ff6c6c !important;
@@ -135,6 +131,11 @@ if "form_key" not in st.session_state:
     st.session_state["form_key"] = 0
 if "limite_registros" not in st.session_state:
     st.session_state["limite_registros"] = 10 
+
+# --- FUNÇÃO DE HORÁRIO BRASIL (CORREÇÃO DE FUSO) ---
+def agora_br():
+    # Pega hora UTC e subtrai 3 horas (Brasília)
+    return datetime.utcnow() - timedelta(hours=3)
 
 # --- FUNÇÕES ---
 def get_repo():
@@ -169,7 +170,7 @@ def registrar_usuario(usuario, senha):
     db_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
     if usuario in db_usuarios: return False, "Usuário já existe!"
     
-    db_usuarios[usuario] = { "password": hash_senha(senha), "created_at": str(datetime.now()) }
+    db_usuarios[usuario] = { "password": hash_senha(senha), "created_at": str(agora_br()) }
     
     json_str = json.dumps(db_usuarios, indent=4)
     atualizar_arquivo_github(ARQUIVO_DB_USUARIOS, json_str, f"Novo usuario: {usuario}")
@@ -219,7 +220,6 @@ if "logado" not in st.session_state:
 # --- ÁREA LOGADA ---
 if st.session_state["logado"]:
     with st.sidebar:
-        # SAUDAÇÃO ALTERADA
         st.write(f"Olá, **busólogo**!")
         st.caption(f"Logado como: {st.session_state['usuario_atual']}")
         
@@ -235,9 +235,11 @@ if st.session_state["logado"]:
         
         with st.form(f"nova_viagem_{key_atual}"):
             c1, c2 = st.columns(2)
-            data = c1.date_input("Data", datetime.now(), format="DD/MM/YYYY") 
             
-            # HORA FIXA EM 00:00
+            # DATA CORRIGIDA (Brasília UTC-3)
+            data = c1.date_input("Data", agora_br(), format="DD/MM/YYYY") 
+            
+            # HORA FIXA EM 00:00 (Como você pediu)
             hora_padrao = datetime_time(0, 0)
             hora = c2.time_input("Hora", value=hora_padrao)
             
@@ -258,7 +260,7 @@ if st.session_state["logado"]:
                             "data": str(data),
                             "hora": str(hora)[:5],
                             "obs": obs,
-                            "timestamp": str(datetime.now())
+                            "timestamp": str(agora_br()) # TIMESTAMP UTC-3
                         }
                         df_novo = pd.DataFrame([novo_dado])
                         df_final = pd.concat([df_antigo, df_novo], ignore_index=True)
@@ -285,7 +287,8 @@ if st.session_state["logado"]:
             
             filtro_tempo = st.pills("Período:", ["Tudo", "7 Dias", "30 Dias", "Este Ano"], default="Tudo")
             
-            hoje = datetime.now()
+            # Comparação sempre com horário Brasil
+            hoje = agora_br()
             if filtro_tempo == "7 Dias":
                 df = df[df['datetime_full'] >= (hoje - timedelta(days=7))]
             elif filtro_tempo == "30 Dias":
@@ -356,7 +359,6 @@ else:
     with tab_cadastro:
         st.write("### Criar Nova Conta")
         
-        # AVISO IMPORTANTE DE SENHA
         st.warning("⚠ **IMPORTANTE:** Anote sua senha em um local seguro! Como não coletamos e-mail por privacidade, **é impossível recuperar a conta** caso você a perca.")
         
         c_user = st.text_input("Escolha um Usuário")
