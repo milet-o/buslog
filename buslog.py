@@ -54,7 +54,7 @@ st.markdown("""
         overflow: hidden; 
     }
     .journal-card:hover {
-        transform: translateX(5px);
+        transform: translateX(2px);
         border-color: #555;
         background-color: #252528;
     }
@@ -111,6 +111,12 @@ st.markdown("""
         margin-bottom: 5px;
         font-weight: 500;
     }
+
+    /* 10. ESTILO DO BOTÃO DE DELETAR */
+    /* Ajuste fino para o botão ficar alinhado verticalmente com o card */
+    div[data-testid="column"] button {
+        margin-top: 15px; 
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -165,11 +171,9 @@ def hash_senha(password):
 def verificar_senha(password, hashed):
     return bcrypt.checkpw(password.encode(), hashed.encode())
 
-# --- REGISTRO BLINDADO (LOWERCASE) ---
+# --- FUNÇÕES DE LÓGICA DO USUÁRIO ---
 def registrar_usuario(usuario, senha):
-    # BLINDAGEM: Transforma em minúsculo e tira espaços
     usuario = usuario.lower().strip()
-    
     db_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
     if usuario in db_usuarios: return False, "Usuário já existe!"
     
@@ -179,14 +183,30 @@ def registrar_usuario(usuario, senha):
     atualizar_arquivo_github(ARQUIVO_DB_USUARIOS, json_str, f"Novo usuario: {usuario}")
     return True, "Conta criada com sucesso!"
 
-# --- LOGIN BLINDADO (LOWERCASE) ---
 def fazer_login(usuario, senha):
-    # BLINDAGEM: Transforma em minúsculo e tira espaços
     usuario = usuario.lower().strip()
-    
     db_usuarios = ler_arquivo_github(ARQUIVO_DB_USUARIOS, 'json')
     if usuario in db_usuarios:
         if verificar_senha(senha, db_usuarios[usuario]['password']): return True
+    return False
+
+# --- FUNÇÃO DE EXCLUIR REGISTRO (NOVA) ---
+def excluir_registro(index_original):
+    """Remove a linha do CSV baseada no index original do Pandas"""
+    df = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
+    
+    if index_original in df.index:
+        df = df.drop(index_original)
+        
+        # ORGANIZAÇÃO: Agrupa por usuário (A-Z) e depois por data (Mais recente primeiro)
+        # Isso garante que no CSV do GitHub fique tudo organizado
+        if not df.empty:
+            df['datetime_temp'] = pd.to_datetime(df['data'].astype(str) + ' ' + df['hora'].astype(str), errors='coerce')
+            df = df.sort_values(by=['usuario', 'datetime_temp'], ascending=[True, False])
+            df = df.drop(columns=['datetime_temp']) # Remove coluna auxiliar
+            
+        atualizar_arquivo_github(ARQUIVO_DB_VIAGENS, df.to_csv(index=False), "Registro excluído")
+        return True
     return False
 
 def tocar_buzina():
@@ -268,6 +288,13 @@ if st.session_state["logado"]:
                         }
                         df_novo = pd.DataFrame([novo_dado])
                         df_final = pd.concat([df_antigo, df_novo], ignore_index=True)
+                        
+                        # ORGANIZAÇÃO: Ordena o CSV inteiro antes de salvar
+                        df_final['datetime_temp'] = pd.to_datetime(df_final['data'].astype(str) + ' ' + df_final['hora'].astype(str), errors='coerce')
+                        # Ordena por USUÁRIO (A-Z) e depois por DATA (Recente primeiro)
+                        df_final = df_final.sort_values(by=['usuario', 'datetime_temp'], ascending=[True, False])
+                        df_final = df_final.drop(columns=['datetime_temp'])
+                        
                         atualizar_arquivo_github(ARQUIVO_DB_VIAGENS, df_final.to_csv(index=False), "Nova viagem")
                         
                         tocar_buzina()
@@ -282,54 +309,77 @@ if st.session_state["logado"]:
         df = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
         
         if not df.empty:
-            df = df[df['usuario'] == st.session_state['usuario_atual']]
+            # 1. Filtra pelo usuário atual
+            df_filtered = df[df['usuario'] == st.session_state['usuario_atual']].copy()
             
-            df['data'] = df['data'].astype(str)
-            df['hora'] = df['hora'].astype(str)
-            df['datetime_full'] = pd.to_datetime(df['data'] + ' ' + df['hora'], errors='coerce')
-            df = df.dropna(subset=['datetime_full'])
+            # 2. Cria coluna de datetime para ordenação visual
+            df_filtered['data'] = df_filtered['data'].astype(str)
+            df_filtered['hora'] = df_filtered['hora'].astype(str)
+            df_filtered['datetime_full'] = pd.to_datetime(df_filtered['data'] + ' ' + df_filtered['hora'], errors='coerce')
+            df_filtered = df_filtered.dropna(subset=['datetime_full'])
             
+            # Filtros visuais
             filtro_tempo = st.pills("Período:", ["Tudo", "7 Dias", "30 Dias", "Este Ano"], default="Tudo")
-            
             hoje = agora_br()
+            
             if filtro_tempo == "7 Dias":
-                df = df[df['datetime_full'] >= (hoje - timedelta(days=7))]
+                df_filtered = df_filtered[df_filtered['datetime_full'] >= (hoje - timedelta(days=7))]
             elif filtro_tempo == "30 Dias":
-                df = df[df['datetime_full'] >= (hoje - timedelta(days=30))]
+                df_filtered = df_filtered[df_filtered['datetime_full'] >= (hoje - timedelta(days=30))]
             elif filtro_tempo == "Este Ano":
-                df = df[df['datetime_full'].dt.year == hoje.year]
+                df_filtered = df_filtered[df_filtered['datetime_full'].dt.year == hoje.year]
             
-            df = df.sort_values(by='datetime_full', ascending=False)
+            # Ordenação VISUAL (do mais recente para o antigo)
+            df_filtered = df_filtered.sort_values(by='datetime_full', ascending=False)
             
-            total_registros = len(df)
+            # Paginação
+            total_registros = len(df_filtered)
             limite = st.session_state["limite_registros"]
-            df_view = df.head(limite)
+            df_view = df_filtered.head(limite)
             
             df_view['ano'] = df_view['datetime_full'].dt.year
             df_view['mes'] = df_view['datetime_full'].dt.month
             grupos = df_view.groupby(['ano', 'mes'], sort=False)
             
-            if df.empty:
+            if df_filtered.empty:
                 st.info("Nenhuma viagem válida encontrada neste período.")
             else:
                 for (ano, mes), grupo in grupos:
                     nome_mes = MESES_PT[mes]
                     st.markdown(f"<div class='month-header'>{nome_mes} {ano}</div>", unsafe_allow_html=True)
                     
-                    for _, row in grupo.iterrows():
+                    # Iterar pelo grupo (iterrows retorna o index original do CSV!)
+                    for index, row in grupo.iterrows():
                         obs_texto = f" • {row['obs']}" if pd.notna(row['obs']) and row['obs'] else ""
                         
-                        card_html = f"""
-                        <div class="journal-card">
-                            <div class="strip"></div>
-                            <div class="date-col">{row['datetime_full'].day}</div>
-                            <div class="info-col">
-                                <div class="bus-line">{row['linha']}</div>
-                                <div class="meta-info">🕒 {str(row['hora'])[:5]}{obs_texto}</div>
+                        # Layout: Card + Botão Deletar
+                        # Usamos colunas: Coluna 1 (Card - 85%) | Coluna 2 (Botão - 15%)
+                        col_card, col_del = st.columns([0.88, 0.12])
+                        
+                        with col_card:
+                            card_html = f"""
+                            <div class="journal-card">
+                                <div class="strip"></div>
+                                <div class="date-col">{row['datetime_full'].day}</div>
+                                <div class="info-col">
+                                    <div class="bus-line">{row['linha']}</div>
+                                    <div class="meta-info">🕒 {str(row['hora'])[:5]}{obs_texto}</div>
+                                </div>
                             </div>
-                        </div>
-                        """
-                        st.markdown(card_html, unsafe_allow_html=True)
+                            """
+                            st.markdown(card_html, unsafe_allow_html=True)
+                        
+                        with col_del:
+                            # Botão de Excluir
+                            # A key precisa ser única para cada botão, usamos o index da linha
+                            if st.button("❌", key=f"del_{index}", help="Excluir este registro"):
+                                with st.spinner("Apagando..."):
+                                    if excluir_registro(index):
+                                        st.success("Apagado!")
+                                        time.sleep(1)
+                                        st.rerun()
+                                    else:
+                                        st.error("Erro ao apagar.")
                 
                 if total_registros > limite:
                     st.markdown("---")
@@ -354,7 +404,6 @@ else:
             with st.spinner("Entrando..."):
                 if fazer_login(l_user, l_pass):
                     st.session_state["logado"] = True
-                    # GARANTIA FINAL: Salva na sessão em minúsculo também
                     st.session_state["usuario_atual"] = l_user.lower().strip()
                     st.rerun()
                 else:
