@@ -7,6 +7,7 @@ import io
 import time
 import bcrypt
 import base64
+import threading # BIBLIOTECA NOVA PARA O "BACKGROUND"
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(page_title="BusLog", page_icon="🚌", layout="centered")
@@ -80,10 +81,7 @@ st.markdown("""
     .stat-value { font-size: 20px; font-weight: bold; color: #fff; }
     .stat-value-small { font-size: 14px; font-weight: bold; color: #fff; word-wrap: break-word; line-height: 1.2; }
     
-    /* RESULTADOS DA BUSCA (Botões) */
-    div[data-testid="stVerticalBlock"] > div > button {
-        text-align: left;
-    }
+    div[data-testid="stVerticalBlock"] > div > button { text-align: left; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -101,10 +99,14 @@ ARQUIVO_DB_PERFIL = "perfil.json"
 ARQUIVO_DB_SOCIAL = "social.json"
 ARQUIVO_ROTAS = "rotasrj.json"
 
-# --- ESTADO DE SESSÃO ---
+# --- ESTADO DE SESSÃO & CACHE LOCAL ---
 if "form_key" not in st.session_state: st.session_state["form_key"] = 0
 if "limite_registros" not in st.session_state: st.session_state["limite_registros"] = 10
 if "perfil_visitado" not in st.session_state: st.session_state["perfil_visitado"] = None
+
+# Variavel para guardar o CSV localmente e ser rápido
+if "cache_viagens" not in st.session_state: st.session_state["cache_viagens"] = pd.DataFrame()
+if "dados_carregados" not in st.session_state: st.session_state["dados_carregados"] = False
 
 # --- FUNÇÕES ---
 def agora_br(): return datetime.utcnow() - timedelta(hours=3)
@@ -120,6 +122,16 @@ def ler_arquivo_github(nome_arquivo, tipo='json'):
         else: return pd.read_csv(io.StringIO(decodificado))
     except: return {} if tipo == 'json' else pd.DataFrame()
 
+# FUNÇÃO DE SINCRONIZAR (BAIXA TUDO DO GITHUB PRO CACHE)
+def sincronizar_dados():
+    df = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
+    st.session_state["cache_viagens"] = df
+    st.session_state["dados_carregados"] = True
+
+# Se for a primeira vez, baixa os dados
+if not st.session_state["dados_carregados"]:
+    sincronizar_dados()
+
 def atualizar_arquivo_github(nome_arquivo, conteudo, mensagem_commit):
     repo = get_repo()
     try:
@@ -127,6 +139,11 @@ def atualizar_arquivo_github(nome_arquivo, conteudo, mensagem_commit):
         repo.update_file(contents.path, mensagem_commit, conteudo, contents.sha)
     except:
         repo.create_file(nome_arquivo, mensagem_commit, conteudo)
+
+# THREAD DE BACKGROUND (SALVA SEM TRAVAR O SITE)
+def salvar_background(df_para_salvar):
+    csv_str = df_para_salvar.to_csv(index=False)
+    atualizar_arquivo_github(ARQUIVO_DB_VIAGENS, csv_str, "Update Background")
 
 def hash_senha(password): return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 def verificar_senha(password, hashed): return bcrypt.checkpw(password.encode(), hashed.encode())
@@ -224,15 +241,29 @@ def fazer_login(usuario, senha):
         if verificar_senha(senha, db_usuarios[usuario]['password']): return True
     return False
 
-def excluir_registro(index_original):
-    df = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
+# --- EXCLUIR RÁPIDO (COM THREAD) ---
+def excluir_registro_rapido(index_original):
+    # 1. Pega o DataFrame do CACHE
+    df = st.session_state["cache_viagens"]
+    
     if index_original in df.index:
+        # 2. Atualiza LOCALMENTE (Instantâneo)
         df = df.drop(index_original)
+        
+        # Reordena para garantir integridade
         if not df.empty:
             df['datetime_temp'] = pd.to_datetime(df['data'].astype(str) + ' ' + df['hora'].astype(str), errors='coerce')
             df = df.sort_values(by=['usuario', 'datetime_temp'], ascending=[True, False])
             df = df.drop(columns=['datetime_temp'])
-        atualizar_arquivo_github(ARQUIVO_DB_VIAGENS, df.to_csv(index=False), "Registro excluído")
+        
+        # Salva de volta no Cache
+        st.session_state["cache_viagens"] = df
+        
+        # 3. Lança a THREAD para o GitHub (Invisible)
+        # Passamos uma CÓPIA do dataframe para a thread para evitar conflitos
+        thread = threading.Thread(target=salvar_background, args=(df.copy(),))
+        thread.start()
+        
         return True
     return False
 
@@ -267,41 +298,38 @@ if "logado" not in st.session_state:
 if st.session_state["logado"]:
     meu_user = st.session_state["usuario_atual"]
     
-    # --- HEADER GLOBAL (Título + Pesquisa) ---
     col_titulo, col_pesquisa = st.columns([0.65, 0.35])
-    
-    with col_titulo:
-        st.title("🚌 BusLog")
-    
+    with col_titulo: st.title("🚌 BusLog")
     with col_pesquisa:
-        # Espaçamento para alinhar com o título
-        st.write("") 
-        st.write("")
+        st.write(""); st.write("")
         termo_busca = st.text_input("🔍 Buscar Busólogo", placeholder="Nome ou user...", label_visibility="collapsed").lower().strip()
     
-    # LOGICA DE EXIBIÇÃO DE RESULTADOS DA BUSCA (Aparece logo abaixo se tiver busca)
     if termo_busca:
         db_perfis = ler_arquivo_github(ARQUIVO_DB_PERFIL, 'json')
-        # Busca no user (chave) e no display_name
         resultados = [u for u in db_perfis.keys() if termo_busca in u or termo_busca in db_perfis[u].get('display_name', '').lower()]
-        
         if resultados:
             st.caption(f"Resultados para '{termo_busca}':")
-            cols_res = st.columns(min(len(resultados), 4)) # Mostra até 4 por linha ou lista
+            cols_res = st.columns(min(len(resultados), 4))
             for i, res in enumerate(resultados):
-                # Cria um botão para cada resultado
                 label_res = f"{db_perfis[res].get('display_name', res)} (@{res})"
                 if st.button(f"👤 {label_res}", key=f"top_search_{res}", use_container_width=True):
                     st.session_state["perfil_visitado"] = res
                     st.rerun()
-        else:
-            st.caption("Nenhum busólogo encontrado.")
+        else: st.caption("Nenhum busólogo encontrado.")
         st.markdown("---")
 
-    # SIDEBAR MINIMALISTA
     with st.sidebar:
         st.write(f"Olá, **busólogo**!")
         st.caption(f"Logado como: @{meu_user}")
+        
+        # BOTÃO DE SINCRONIZAR
+        if st.button("🔄 Sincronizar", use_container_width=True, help="Baixar dados novos da nuvem"):
+            with st.spinner("Baixando dados..."):
+                sincronizar_dados()
+            st.success("Atualizado!")
+            time.sleep(0.5)
+            st.rerun()
+            
         if st.button("🏠 Início", use_container_width=True):
             st.session_state["perfil_visitado"] = None
             st.rerun()
@@ -309,21 +337,16 @@ if st.session_state["logado"]:
             st.session_state["logado"] = False
             st.rerun()
 
-    # --- MODO VISITANTE ---
     if st.session_state["perfil_visitado"]:
         visitado = st.session_state["perfil_visitado"]
         dados_perfil = carregar_perfil(visitado)
-        
         social_db = carregar_social()
         seguindo_lista = social_db.get(meu_user, [])
         eh_seguido = visitado in seguindo_lista
         
-        # Header Visitante
         c_v1, c_v2 = st.columns([1, 4])
         with c_v1:
-            if st.button("⬅ Voltar"):
-                st.session_state["perfil_visitado"] = None
-                st.rerun()
+            if st.button("⬅ Voltar"): st.session_state["perfil_visitado"] = None; st.rerun()
         with c_v2:
             if visitado != meu_user:
                 btn_txt = "Deixar de Seguir" if eh_seguido else "Seguir"
@@ -334,62 +357,45 @@ if st.session_state["logado"]:
                         else: seguir_usuario(meu_user, visitado)
                         st.rerun()
 
-        st.markdown(f"""
-        <div class="profile-header">
-            <div class="avatar">{dados_perfil.get('avatar', '👤')}</div>
-            <div class="display-name">{dados_perfil.get('display_name', visitado)}</div>
-            <div class="username-tag">@{visitado}</div>
-            <div class="bio-text">"{dados_perfil.get('bio', '')}"</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f"""<div class="profile-header"><div class="avatar">{dados_perfil.get('avatar', '👤')}</div><div class="display-name">{dados_perfil.get('display_name', visitado)}</div><div class="username-tag">@{visitado}</div><div class="bio-text">"{dados_perfil.get('bio', '')}"</div></div>""", unsafe_allow_html=True)
         
-        # Stats Visitado
-        df_viagens = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
+        # LENDO DO CACHE PARA SER RÁPIDO
+        df_viagens = st.session_state["cache_viagens"]
         segs, segds = get_seguidores_count(visitado)
-        col1, col2, col3, col4 = st.columns(4)
-        col1.markdown(f"<div class='stat-box'><div class='stat-label'>Seguidores</div><div class='stat-value'>{segs}</div></div>", unsafe_allow_html=True)
-        col2.markdown(f"<div class='stat-box'><div class='stat-label'>Seguindo</div><div class='stat-value'>{segds}</div></div>", unsafe_allow_html=True)
+        c1,c2,c3,c4 = st.columns(4)
+        c1.markdown(f"<div class='stat-box'><div class='stat-label'>Seguidores</div><div class='stat-value'>{segs}</div></div>", unsafe_allow_html=True)
+        c2.markdown(f"<div class='stat-box'><div class='stat-label'>Seguindo</div><div class='stat-value'>{segds}</div></div>", unsafe_allow_html=True)
         
         total, linha_fav = 0, "-"
         if not df_viagens.empty:
             dv = df_viagens[df_viagens['usuario'] == visitado]
             total = len(dv)
             if not dv.empty: linha_fav = dv['linha'].mode()[0]
-            
-        col3.markdown(f"<div class='stat-box'><div class='stat-label'>Viagens</div><div class='stat-value'>{total}</div></div>", unsafe_allow_html=True)
-        col4.markdown(f"<div class='stat-box'><div class='stat-label'>Linha Fav.</div><div class='stat-value-small'>{linha_fav}</div></div>", unsafe_allow_html=True)
+        c3.markdown(f"<div class='stat-box'><div class='stat-label'>Viagens</div><div class='stat-value'>{total}</div></div>", unsafe_allow_html=True)
+        c4.markdown(f"<div class='stat-box'><div class='stat-label'>Linha Fav.</div><div class='stat-value-small'>{linha_fav}</div></div>", unsafe_allow_html=True)
         
-        st.write("")
-        st.markdown("### 📓 Diário Público")
+        st.write(""); st.markdown("### 📓 Diário Público")
         if total > 0:
             dv['datetime_full'] = pd.to_datetime(dv['data'].astype(str) + ' ' + dv['hora'].astype(str), errors='coerce')
             dv = dv.sort_values(by='datetime_full', ascending=False).head(10)
             for _, row in dv.iterrows():
                 obs = f" • {row['obs']}" if pd.notna(row['obs']) and row['obs'] else ""
-                st.markdown(f"""
-                <div class="journal-card">
-                    <div class="strip"></div><div class="date-col">{row['datetime_full'].day}</div>
-                    <div class="info-col"><div class="bus-line">{row['linha']}</div><div class="meta-info">🕒 {str(row['hora'])[:5]}{obs}</div></div>
-                </div>""", unsafe_allow_html=True)
+                st.markdown(f"""<div class="journal-card"><div class="strip"></div><div class="date-col">{row['datetime_full'].day}</div><div class="info-col"><div class="bus-line">{row['linha']}</div><div class="meta-info">🕒 {str(row['hora'])[:5]}{obs}</div></div></div>""", unsafe_allow_html=True)
         else: st.info("Sem registros públicos.")
 
-    # --- MODO PRINCIPAL ---
     else:
         aba_feed, aba_nova, aba_diario, aba_perfil = st.tabs(["📡 Atividade", "📝 Nova Viagem", "📓 Diário", "👤 Meu Perfil"])
         
         with aba_feed:
-            df_viagens = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
+            # LENDO DO CACHE
+            df_viagens = st.session_state["cache_viagens"]
             if not df_viagens.empty:
                 social_db = carregar_social()
                 quem_sigo = social_db.get(meu_user, [])
-                
-                if not quem_sigo:
-                    st.info("Siga amigos para ver atividades!")
+                if not quem_sigo: st.info("Siga amigos para ver atividades!")
                 else:
-                    # FEED: Apenas quem eu sigo (exclui eu mesmo)
                     df_feed = df_viagens[df_viagens['usuario'].isin(quem_sigo)].copy()
                     feed_items = agrupar_viagens_atividade(df_feed)
-                    
                     if not feed_items: st.info("Seus amigos ainda não postaram nada.")
                     else:
                         db_perfis = ler_arquivo_github(ARQUIVO_DB_PERFIL, 'json')
@@ -397,14 +403,7 @@ if st.session_state["logado"]:
                             u, viags = item['usuario'], item['viagens']
                             perf = db_perfis.get(u, {})
                             with st.container():
-                                st.markdown(f"""
-                                <div class="activity-card">
-                                    <div class="activity-header">
-                                        <span class="user-avatar">{perf.get('avatar', '👤')}</span>
-                                        <span class="user-name">{perf.get('display_name', u)}</span>
-                                        <span class="activity-time">{viags[0]['datetime_full'].strftime('%d/%m %H:%M')}</span>
-                                    </div>
-                                """, unsafe_allow_html=True)
+                                st.markdown(f"""<div class="activity-card"><div class="activity-header"><span class="user-avatar">{perf.get('avatar', '👤')}</span><span class="user-name">{perf.get('display_name', u)}</span><span class="activity-time">{viags[0]['datetime_full'].strftime('%d/%m %H:%M')}</span></div>""", unsafe_allow_html=True)
                                 if len(viags) > 1:
                                     with st.expander(f"🚌 {len(viags)} Ônibus (Integração)"):
                                         for v in viags: st.markdown(f"**{v['hora'][:5]}** - {v['linha']}")
@@ -427,18 +426,26 @@ if st.session_state["logado"]:
                 if st.form_submit_button("Salvar Viagem", use_container_width=True):
                     if not linha: st.error("Escolha a linha!")
                     else:
-                        with st.spinner("Salvando..."):
-                            old = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
-                            new = pd.DataFrame([{ "usuario": meu_user, "linha": linha, "data": str(data), "hora": str(hora)[:5], "obs": obs, "timestamp": str(agora_br()) }])
-                            final = pd.concat([old, new], ignore_index=True)
-                            final['dt'] = pd.to_datetime(final['data'].astype(str)+' '+final['hora'].astype(str), errors='coerce')
-                            final = final.sort_values(by=['usuario', 'dt'], ascending=[True, False]).drop(columns=['dt'])
-                            atualizar_arquivo_github(ARQUIVO_DB_VIAGENS, final.to_csv(index=False), "Nova")
-                            tocar_buzina()
-                            st.success("Salvo!"); st.session_state["form_key"]+=1; time.sleep(1); st.rerun()
+                        # 1. ATUALIZA CACHE (RÁPIDO)
+                        df_atual = st.session_state["cache_viagens"]
+                        novo_dado = pd.DataFrame([{ "usuario": meu_user, "linha": linha, "data": str(data), "hora": str(hora)[:5], "obs": obs, "timestamp": str(agora_br()) }])
+                        df_final = pd.concat([df_atual, novo_dado], ignore_index=True)
+                        
+                        df_final['datetime_temp'] = pd.to_datetime(df_final['data'].astype(str)+' '+df_final['hora'].astype(str), errors='coerce')
+                        df_final = df_final.sort_values(by=['usuario', 'datetime_temp'], ascending=[True, False]).drop(columns=['datetime_temp'])
+                        
+                        st.session_state["cache_viagens"] = df_final
+                        
+                        # 2. THREAD (BACKGROUND)
+                        t = threading.Thread(target=salvar_background, args=(df_final.copy(),))
+                        t.start()
+                        
+                        tocar_buzina()
+                        st.success("Salvo!"); st.session_state["form_key"]+=1; time.sleep(0.5); st.rerun()
 
         with aba_diario:
-            df = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
+            # LENDO DO CACHE
+            df = st.session_state["cache_viagens"]
             if not df.empty:
                 dff = df[df['usuario'] == meu_user].copy()
                 dff['dt'] = pd.to_datetime(dff['data'].astype(str)+' '+dff['hora'].astype(str), errors='coerce')
@@ -460,9 +467,12 @@ if st.session_state["logado"]:
                             o = f" • {r['obs']}" if pd.notna(r['obs']) and r['obs'] else ""
                             c1, c2 = st.columns([0.88, 0.12])
                             c1.markdown(f"""<div class="journal-card"><div class="strip"></div><div class="date-col">{r['dt'].day}</div><div class="info-col"><div class="bus-line">{r['linha']}</div><div class="meta-info">🕒 {str(r['hora'])[:5]}{o}</div></div></div>""", unsafe_allow_html=True)
+                            
+                            # DELETE OTIMIZADO
                             if c2.button("❌", key=f"d_{i}"):
-                                with st.spinner("..."): 
-                                    if excluir_registro(i): st.rerun()
+                                excluir_registro_rapido(i)
+                                st.rerun() # RERUN IMEDIATO
+                                
                     if len(dff) > lim:
                         if st.button("Carregar +"): st.session_state["limite_registros"]+=10; st.rerun()
             else: st.info("Vazio.")
@@ -478,7 +488,7 @@ if st.session_state["logado"]:
                 c1.markdown(f"<div class='stat-box'><div class='stat-label'>Seguidores</div><div class='stat-value'>{s1}</div></div>", unsafe_allow_html=True)
                 c2.markdown(f"<div class='stat-box'><div class='stat-label'>Seguindo</div><div class='stat-value'>{s2}</div></div>", unsafe_allow_html=True)
                 
-                dfv = ler_arquivo_github(ARQUIVO_DB_VIAGENS, 'csv')
+                dfv = st.session_state["cache_viagens"]
                 tot, fav = 0, "-"
                 if not dfv.empty:
                     dm = dfv[dfv['usuario']==meu_user]
@@ -500,7 +510,6 @@ if st.session_state["logado"]:
                         with st.spinner("Salvando..."): salvar_perfil_editado(meu_user, nn, nb, na); st.session_state["edit_p"]=False; st.rerun()
                     if c2.form_submit_button("Cancelar"): st.session_state["edit_p"]=False; st.rerun()
 
-# --- LOGIN / CADASTRO (IGUAL) ---
 else:
     tab1, tab2 = st.tabs(["Entrar", "Criar Conta"])
     with tab1:
