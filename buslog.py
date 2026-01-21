@@ -292,15 +292,18 @@ def tocar_buzina():
             st.markdown(f"""<audio autoplay><source src="data:audio/mp4;base64,{b64}" type="audio/mp4"></audio>""", unsafe_allow_html=True)
     except FileNotFoundError: pass 
 
-@st.cache_data
+# --- CORREÇÃO AQUI (V16) ---
+@st.cache_data(ttl=3600) # Atualiza a cada 1 hora
 def carregar_rotas():
+    # 1. TENTA GITHUB PRIMEIRO (Para pegar as rotas novas)
+    dados_nuvem = ler_arquivo_github(ARQUIVO_ROTAS, 'json')
+    if dados_nuvem:
+        return dados_nuvem
+    
+    # 2. Se a nuvem falhar, usa o arquivo local de backup
     try:
-        # AQUI FOI A CORREÇÃO:
-        try:
-            with open(ARQUIVO_ROTAS, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return ler_arquivo_github(ARQUIVO_ROTAS, 'json')
+        with open(ARQUIVO_ROTAS, "r", encoding="utf-8") as f:
+            return json.load(f)
     except:
         return {}
 
@@ -341,7 +344,7 @@ if st.session_state["logado"]:
         st.write(f"Olá, **busólogo**!")
         st.caption(f"Logado como: @{meu_user}")
         if st.button("🔄 Sincronizar", use_container_width=True):
-            with st.spinner("..."): sincronizar_dados()
+            with st.spinner("..."): sincronizar_dados(); st.cache_data.clear()
             st.success("Ok!"); time.sleep(0.5); st.rerun()
         if st.button("🏠 Início", use_container_width=True):
             st.session_state["perfil_visitado"] = None; st.session_state["ver_lista_seguidores"] = None; st.rerun()
