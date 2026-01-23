@@ -18,5 +18,9 @@
     "lucdaputa": {
         "password": "$2b$12$NkWIZ6cF6HihTxmDGH9vd.DiIvzq6tX8GX9wdcOYM2vHZqGp.ktHy",
         "created_at": "2026-01-23 19:54:13.055577"
+    },
+    "lucadaputa": {
+        "password": "$2b$12$VFmY569KYHF4RIhEyjZ5We.KlfwBkbm94IYsVDNx5ypuXM0B8FguK",
+        "created_at": "2026-01-23 19:54:30.434799"
     }
 }
