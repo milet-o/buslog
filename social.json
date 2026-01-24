@@ -5,5 +5,8 @@
     "felipe": [
         "admin",
         "maria"
+    ],
+    "maria": [
+        "felipe"
     ]
 }
