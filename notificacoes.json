@@ -14,5 +14,13 @@
             "timestamp": "2026-01-24 11:14:16.896483",
             "read": false
         }
+    ],
+    "felipe": [
+        {
+            "from_user": "maria",
+            "type": "follow",
+            "timestamp": "2026-01-24 11:15:08.661058",
+            "read": false
+        }
     ]
 }
