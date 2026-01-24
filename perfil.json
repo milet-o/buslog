@@ -22,5 +22,11 @@
         "bio": "Bus\u00f3logo iniciante.",
         "avatar": "\ud83d\udc64",
         "updated_at": "2026-01-23 19:54:32.458850"
+    },
+    "maria": {
+        "display_name": "Maria",
+        "bio": "Bus\u00f3logo.",
+        "avatar": "\ud83d\udc31",
+        "updated_at": "2026-01-24 11:13:31.651829"
     }
 }
