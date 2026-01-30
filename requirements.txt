@@ -3,3 +3,4 @@ streamlit-authenticator
 pandas
 PyGithub
 bcrypt
+matplotlib
