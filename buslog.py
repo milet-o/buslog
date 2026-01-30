@@ -8,9 +8,30 @@ import time
 import bcrypt
 import base64
 import threading
+import matplotlib.pyplot as plt # BIBLIOTECA NOVA PARA OS GRÁFICOS
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(page_title="BusLog", page_icon="🚌", layout="centered")
+
+# --- FUNÇÃO PWA (APP NO CELULAR) ---
+# DICA: Troque este link pelo link RAW do seu ícone no GitHub para ficar perfeito
+LINK_DO_ICONE = "https://cdn-icons-png.flaticon.com/512/3448/3448339.png" 
+
+def configurar_pwa(url_icone):
+    meta_tags = f"""
+    <head>
+        <meta name="apple-mobile-web-app-title" content="BusLog">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        <meta name="theme-color" content="#0e1117">
+        <link rel="apple-touch-icon" href="{url_icone}">
+        <link rel="icon" type="image/png" sizes="192x192" href="{url_icone}">
+    </head>
+    """
+    st.markdown(meta_tags, unsafe_allow_html=True)
+
+configurar_pwa(LINK_DO_ICONE)
 
 # --- CSS PERSONALIZADO ---
 st.markdown("""
@@ -228,6 +249,83 @@ def salvar_perfil_editado(usuario, display_name, bio, avatar):
     atualizar_arquivo_github(ARQUIVO_DB_PERFIL, json_str, f"Perfil atualizado: {usuario}")
     return True
 
+# --- GERADOR DE CARD ESTATÍSTICO (NOVO) ---
+def gerar_card_stats(df_user, nome_exibicao, dias):
+    # Filtra por data
+    agora = agora_br()
+    data_limite = agora - timedelta(days=dias)
+    
+    # Garante que a coluna de data datetime existe
+    if 'dt' not in df_user.columns:
+        df_user['dt'] = pd.to_datetime(df_user['data'].astype(str) + ' ' + df_user['hora'].astype(str), errors='coerce')
+        
+    df_filtrado = df_user[df_user['dt'] >= data_limite]
+    
+    if df_filtrado.empty: return None
+
+    # Dados
+    total_viagens = len(df_filtrado)
+    linha_fav = df_filtrado['linha'].mode()[0] if not df_filtrado.empty else "-"
+    contagem_linhas = df_filtrado['linha'].value_counts().head(5)
+    
+    # --- MATPLOTLIB (DESENHO) ---
+    plt.style.use('dark_background')
+    fig, ax = plt.subplots(figsize=(8, 10))
+    fig.patch.set_facecolor('#1c1c1e')
+    ax.set_facecolor('#1c1c1e')
+    
+    # Título e Cabeçalho
+    ax.text(0.5, 0.95, "RELATÓRIO BUSLOG", ha='center', va='center', fontsize=20, color='#FF4B4B', weight='bold', transform=ax.transAxes)
+    ax.text(0.5, 0.90, f"@{nome_exibicao} • Últimos {dias} dias", ha='center', va='center', fontsize=12, color='#aaaaaa', transform=ax.transAxes)
+    
+    # Linha divisória visual
+    ax.plot([0.1, 0.9], [0.85, 0.85], color='#444', transform=ax.transAxes, linewidth=1)
+    
+    # Stats Grandes
+    ax.text(0.25, 0.75, f"{total_viagens}", ha='center', va='center', fontsize=45, color='white', weight='bold', transform=ax.transAxes)
+    ax.text(0.25, 0.68, "VIAGENS", ha='center', va='center', fontsize=10, color='#888', transform=ax.transAxes)
+    
+    # Ajuste de tamanho da fonte pra linha fav não quebrar
+    tamanho_fonte_fav = 22 if len(linha_fav) < 15 else 14
+    ax.text(0.75, 0.75, f"{linha_fav}", ha='center', va='center', fontsize=tamanho_fonte_fav, color='white', weight='bold', transform=ax.transAxes)
+    ax.text(0.75, 0.68, "LINHA FAVORITA", ha='center', va='center', fontsize=10, color='#888', transform=ax.transAxes)
+
+    # Gráfico de Barras (Top 5)
+    ax.text(0.5, 0.55, "TOP 5 LINHAS", ha='center', va='center', fontsize=14, color='#eee', weight='bold', transform=ax.transAxes)
+    
+    # Posição do gráfico (left, bottom, width, height)
+    ax_bar = fig.add_axes([0.15, 0.15, 0.7, 0.35])
+    
+    linhas = contagem_linhas.index.tolist()[::-1] # Inverte pra o maior ficar em cima
+    valores = contagem_linhas.values.tolist()[::-1]
+    
+    bars = ax_bar.barh(linhas, valores, color='#007bff')
+    ax_bar.set_facecolor('#1c1c1e')
+    ax_bar.spines['top'].set_visible(False)
+    ax_bar.spines['right'].set_visible(False)
+    ax_bar.spines['bottom'].set_visible(False)
+    ax_bar.spines['left'].set_visible(False)
+    ax_bar.tick_params(axis='x', colors='#888')
+    ax_bar.tick_params(axis='y', colors='white', labelsize=9)
+    
+    # Adiciona valores nas barras
+    for bar in bars:
+        width = bar.get_width()
+        ax_bar.text(width + 0.1, bar.get_y() + bar.get_height()/2, f'{int(width)}', va='center', color='white', fontsize=10)
+
+    # Rodapé
+    ax.text(0.5, 0.05, f"Gerado em {agora.strftime('%d/%m/%Y')}", ha='center', va='center', fontsize=8, color='#555', transform=ax.transAxes)
+
+    # Remove eixos do canvas principal
+    ax.axis('off')
+
+    # Salva em buffer
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight', facecolor='#1c1c1e')
+    buf.seek(0)
+    plt.close(fig)
+    return buf
+
 # --- LÓGICA FEED ---
 def agrupar_viagens_atividade(df_viagens):
     if df_viagens.empty: return []
@@ -292,7 +390,6 @@ def tocar_buzina():
             st.markdown(f"""<audio autoplay><source src="data:audio/mp4;base64,{b64}" type="audio/mp4"></audio>""", unsafe_allow_html=True)
     except FileNotFoundError: pass 
 
-# --- CORREÇÃO AQUI (V16) ---
 @st.cache_data(ttl=3600) # Atualiza a cada 1 hora
 def carregar_rotas():
     # 1. TENTA GITHUB PRIMEIRO (Para pegar as rotas novas)
@@ -420,7 +517,8 @@ if st.session_state["logado"]:
         nao_lidas = sum(1 for n in minhas_notifs if not n['read'])
         label_notif = f"🔔 Notificações ({nao_lidas})" if nao_lidas > 0 else "🔔 Notificações"
         
-        aba_feed, aba_nova, aba_diario, aba_notif, aba_perfil = st.tabs(["📡 Atividade", "📝 Nova Viagem", "📓 Diário", label_notif, "👤 Meu Perfil"])
+        # --- NOVA ABA DE RELATÓRIOS ---
+        aba_feed, aba_nova, aba_diario, aba_notif, aba_reports, aba_perfil = st.tabs(["📡 Atividade", "📝 Nova Viagem", "📓 Diário", label_notif, "📊 Relatórios", "👤 Meu Perfil"])
         
         with aba_feed:
             df_viagens = st.session_state["cache_viagens"]
@@ -515,6 +613,36 @@ if st.session_state["logado"]:
                         if c_n2.button("Ver", key=f"not_{notif['from_user']}_{notif['timestamp']}"):
                             st.session_state["perfil_visitado"] = notif['from_user']; st.rerun()
                         st.markdown("---")
+        
+        # --- CONTEÚDO DA NOVA ABA RELATÓRIOS ---
+        with aba_reports:
+            st.markdown("### 📊 Gerar Relatório")
+            st.caption("Crie um card bonito para compartilhar nas redes sociais.")
+            
+            periodo = st.selectbox("Escolha o período:", [7, 30, 180, 365], format_func=lambda x: f"Últimos {x} dias")
+            
+            if st.button("Gerar Card", use_container_width=True):
+                df_viagens = st.session_state["cache_viagens"]
+                if not df_viagens.empty:
+                    # Filtra só o usuário atual
+                    df_meu = df_viagens[df_viagens['usuario'] == meu_user].copy()
+                    
+                    with st.spinner("Desenhando card..."):
+                        imagem_buffer = gerar_card_stats(df_meu, meu_user, periodo)
+                    
+                    if imagem_buffer:
+                        st.image(imagem_buffer, caption="Seu relatório BusLog", use_container_width=True)
+                        st.download_button(
+                            label="⬇️ Baixar Imagem (PNG)",
+                            data=imagem_buffer,
+                            file_name=f"buslog_report_{meu_user}.png",
+                            mime="image/png",
+                            use_container_width=True
+                        )
+                    else:
+                        st.warning("Você não tem viagens nesse período!")
+                else:
+                    st.warning("Nenhuma viagem registrada ainda.")
 
         with aba_perfil:
             p = carregar_perfil(meu_user)
