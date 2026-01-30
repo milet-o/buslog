@@ -10,7 +10,7 @@ import base64
 import threading
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-import textwrap # Importante para quebrar o texto das linhas
+import textwrap
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(page_title="BusLog", page_icon="🚌", layout="centered")
@@ -250,7 +250,7 @@ def salvar_perfil_editado(usuario, display_name, bio, avatar):
     atualizar_arquivo_github(ARQUIVO_DB_PERFIL, json_str, f"Perfil atualizado: {usuario}")
     return True
 
-# --- GERADOR DE CARD ESTATÍSTICO (V19 - REDESIGN RADICAL) ---
+# --- GERADOR DE CARD ESTATÍSTICO (V20 - CORREÇÃO DE ERRO) ---
 def gerar_card_stats(df_user, nome_exibicao, dias):
     agora = agora_br()
     data_limite = agora - timedelta(days=dias)
@@ -259,31 +259,28 @@ def gerar_card_stats(df_user, nome_exibicao, dias):
     df_filtrado = df_user[df_user['dt'] >= data_limite]
     if df_filtrado.empty: return None
 
-    # --- PREPARAÇÃO DOS DADOS ---
+    # --- DADOS ---
     total_viagens = len(df_filtrado)
     contagem_linhas = df_filtrado['linha'].value_counts().head(5)
     
-    # Dados para o gráfico de dias da semana
     dias_pt = {0: 'Seg', 1: 'Ter', 2: 'Qua', 3: 'Qui', 4: 'Sex', 5: 'Sáb', 6: 'Dom'}
     df_filtrado['dia_semana'] = df_filtrado['dt'].dt.weekday.map(dias_pt)
     contagem_dias = df_filtrado['dia_semana'].value_counts().sort_values(ascending=True)
 
-    # --- MATPLOTLIB SETUP (QUADRADO REAL 8x8) ---
+    # --- MATPLOTLIB ---
     plt.style.use('dark_background')
     fig = plt.figure(figsize=(8, 8))
     
     bg_color = '#1c1c1e'
     text_color = '#ffffff'
     sub_text_color = '#aaaaaa'
-    orange_color = '#ff7f0e' # Laranja para dias
+    orange_color = '#ff7f0e'
 
     fig.patch.set_facecolor(bg_color)
-    # Borda externa sólida
     fig.patch.set_linewidth(4)
     fig.patch.set_edgecolor('#333333')
 
-    # --- LAYOUT DE GRID (2 COLUNAS) ---
-    # A coluna da esquerda é um pouco mais larga para caber os nomes dos ônibus
+    # --- GRID ---
     gs = gridspec.GridSpec(1, 2, width_ratios=[1.3, 0.7])
     ax_left = plt.subplot(gs[0])
     ax_right = plt.subplot(gs[1])
@@ -293,59 +290,49 @@ def gerar_card_stats(df_user, nome_exibicao, dias):
     ax_left.axis('off')
     ax_right.axis('off')
 
-    # --- COLUNA ESQUERDA (ALINHADA À ESQUERDA) ---
-    # Âncora X para alinhamento esquerdo perfeito
+    # --- COLUNA ESQUERDA ---
     left_anchor = 0.05
-
-    # Cabeçalho
     ax_left.text(left_anchor, 0.94, "buslog.streamlit.app", ha='left', va='center', fontsize=20, color=text_color, weight='bold', transform=ax_left.transAxes)
     ax_left.text(left_anchor, 0.89, f"@{nome_exibicao} • Últimos {dias} dias", ha='left', va='center', fontsize=12, color=sub_text_color, transform=ax_left.transAxes)
-    
-    # Divisória Esquerda
     ax_left.plot([left_anchor, 0.9], [0.85, 0.85], color='#444', transform=ax_left.transAxes, linewidth=1)
 
-    # Total Viagens Gigante
     ax_left.text(left_anchor, 0.72, f"{total_viagens}", ha='left', va='bottom', fontsize=70, color=text_color, weight='bold', transform=ax_left.transAxes)
     ax_left.text(left_anchor, 0.68, "VIAGENS NO PERÍODO", ha='left', va='top', fontsize=12, color=sub_text_color, transform=ax_left.transAxes)
 
-    # Lista Top 5 Linhas (Texto Justificado)
     ax_left.text(left_anchor, 0.55, "TOP LINHAS", ha='left', va='center', fontsize=14, color=text_color, weight='bold', transform=ax_left.transAxes)
     
     y_pos = 0.48
     for i, (linha, count) in enumerate(contagem_linhas.items()):
-        # Quebra o texto em várias linhas se for muito longo (largura aprox 28 caracteres)
         wrapped_name = textwrap.fill(linha, width=28)
-        
-        # O nome da linha
         ax_left.text(left_anchor, y_pos, wrapped_name, ha='left', va='top', fontsize=11, color=text_color, transform=ax_left.transAxes, linespacing=1.2)
-        # A contagem ao lado
         ax_left.text(0.9, y_pos, f"{count}x", ha='right', va='top', fontsize=11, color=sub_text_color, weight='bold', transform=ax_left.transAxes)
-        
-        # Calcula o espaço necessário baseado nas quebras de linha para o próximo item
         num_lines = len(wrapped_name.split('\n'))
-        y_pos -= (0.04 * num_lines) + 0.03 # Espaçamento dinâmico
+        y_pos -= (0.04 * num_lines) + 0.03
 
-    # --- COLUNA DIREITA (GRÁFICO DIAS DA SEMANA LARANJA) ---
-    # Título do gráfico da direita
+    # --- COLUNA DIREITA (CORREÇÃO DO ERRO) ---
     ax_right.text(0.5, 0.55, "POR DIA DA SEMANA", ha='center', va='center', fontsize=12, color=text_color, weight='bold', transform=ax_right.transAxes)
 
-    # Área do gráfico de barras dentro da coluna direita
-    # [left, bottom, width, height] relativos ao ax_right
     inset_ax = ax_right.inset_axes([0.1, 0.05, 0.8, 0.45])
     inset_ax.set_facecolor(bg_color)
 
     if not contagem_dias.empty:
-        dias = contagem_dias.index.tolist()
+        # AQUI FOI A CORREÇÃO: Usamos posições numéricas para o eixo Y
+        dias_labels = contagem_dias.index.tolist()
         valores_dias = contagem_dias.values.tolist()
-        # Barras laranjas, sem borda branca ridícula
-        bars_dias = inset_ax.barh(dias, valores_dias, color=orange_color)
+        y_positions = range(len(dias_labels))
         
-        # Limpeza do gráfico
+        # Plota usando números no eixo Y
+        bars_dias = inset_ax.barh(y_positions, valores_dias, color=orange_color)
+        
+        # Define os textos das labels manualmente
+        inset_ax.set_yticks(y_positions)
+        inset_ax.set_yticklabels(dias_labels)
+        
+        # Limpeza
         for spine in inset_ax.spines.values(): spine.set_visible(False)
         inset_ax.set_xticks([])
         inset_ax.tick_params(axis='y', colors=text_color, labelsize=11, length=0)
 
-        # Valores nas barras laranjas
         for bar in bars_dias:
             width = bar.get_width()
             inset_ax.text(width + 0.1, bar.get_y() + bar.get_height()/2, f'{int(width)}', va='center', color=text_color, fontsize=10, weight='bold')
@@ -353,7 +340,6 @@ def gerar_card_stats(df_user, nome_exibicao, dias):
         inset_ax.text(0.5, 0.5, "Sem dados", ha='center', va='center', color=sub_text_color)
         inset_ax.axis('off')
 
-    # Salva sem cortar (bbox_inches=None para respeitar o quadrado 8x8)
     buf = io.BytesIO()
     plt.savefig(buf, format='png', dpi=150, facecolor=fig.get_facecolor(), edgecolor=fig.get_edgecolor())
     buf.seek(0)
