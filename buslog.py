@@ -8,13 +8,13 @@ import time
 import bcrypt
 import base64
 import threading
-import matplotlib.pyplot as plt # BIBLIOTECA NOVA PARA OS GRÁFICOS
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(page_title="BusLog", page_icon="🚌", layout="centered")
 
-# --- FUNÇÃO PWA (APP NO CELULAR) ---
-# DICA: Troque este link pelo link RAW do seu ícone no GitHub para ficar perfeito
+# --- FUNÇÃO PWA ---
 LINK_DO_ICONE = "https://cdn-icons-png.flaticon.com/512/3448/3448339.png" 
 
 def configurar_pwa(url_icone):
@@ -249,79 +249,79 @@ def salvar_perfil_editado(usuario, display_name, bio, avatar):
     atualizar_arquivo_github(ARQUIVO_DB_PERFIL, json_str, f"Perfil atualizado: {usuario}")
     return True
 
-# --- GERADOR DE CARD ESTATÍSTICO (NOVO) ---
+# --- GERADOR DE CARD ESTATÍSTICO (V18 - REDESIGN) ---
 def gerar_card_stats(df_user, nome_exibicao, dias):
-    # Filtra por data
     agora = agora_br()
     data_limite = agora - timedelta(days=dias)
-    
-    # Garante que a coluna de data datetime existe
     if 'dt' not in df_user.columns:
         df_user['dt'] = pd.to_datetime(df_user['data'].astype(str) + ' ' + df_user['hora'].astype(str), errors='coerce')
-        
     df_filtrado = df_user[df_user['dt'] >= data_limite]
-    
     if df_filtrado.empty: return None
 
-    # Dados
     total_viagens = len(df_filtrado)
-    linha_fav = df_filtrado['linha'].mode()[0] if not df_filtrado.empty else "-"
     contagem_linhas = df_filtrado['linha'].value_counts().head(5)
     
-    # --- MATPLOTLIB (DESENHO) ---
+    # --- MATPLOTLIB ---
     plt.style.use('dark_background')
-    fig, ax = plt.subplots(figsize=(8, 10))
-    fig.patch.set_facecolor('#1c1c1e')
-    ax.set_facecolor('#1c1c1e')
+    # MUDANÇA 1: TORNAR QUADRADO (8x8 polegadas)
+    fig, ax = plt.subplots(figsize=(8, 8))
     
-    # Título e Cabeçalho
-    ax.text(0.5, 0.95, "RELATÓRIO BUSLOG", ha='center', va='center', fontsize=20, color='#FF4B4B', weight='bold', transform=ax.transAxes)
-    ax.text(0.5, 0.90, f"@{nome_exibicao} • Últimos {dias} dias", ha='center', va='center', fontsize=12, color='#aaaaaa', transform=ax.transAxes)
+    # Cores e Estilo
+    bg_color = '#1c1c1e'
+    accent_color = '#FF4B4B'
+    text_color = '#ffffff'
+    sub_text_color = '#aaaaaa'
+    bar_color = '#007bff'
     
-    # Linha divisória visual
-    ax.plot([0.1, 0.9], [0.85, 0.85], color='#444', transform=ax.transAxes, linewidth=1)
+    fig.patch.set_facecolor(bg_color)
+    ax.set_facecolor(bg_color)
     
-    # Stats Grandes
-    ax.text(0.25, 0.75, f"{total_viagens}", ha='center', va='center', fontsize=45, color='white', weight='bold', transform=ax.transAxes)
-    ax.text(0.25, 0.68, "VIAGENS", ha='center', va='center', fontsize=10, color='#888', transform=ax.transAxes)
-    
-    # Ajuste de tamanho da fonte pra linha fav não quebrar
-    tamanho_fonte_fav = 22 if len(linha_fav) < 15 else 14
-    ax.text(0.75, 0.75, f"{linha_fav}", ha='center', va='center', fontsize=tamanho_fonte_fav, color='white', weight='bold', transform=ax.transAxes)
-    ax.text(0.75, 0.68, "LINHA FAVORITA", ha='center', va='center', fontsize=10, color='#888', transform=ax.transAxes)
+    # Borda no Card inteiro
+    fig.patch.set_linewidth(4)
+    fig.patch.set_edgecolor('#333333')
 
-    # Gráfico de Barras (Top 5)
-    ax.text(0.5, 0.55, "TOP 5 LINHAS", ha='center', va='center', fontsize=14, color='#eee', weight='bold', transform=ax.transAxes)
+    # --- CABEÇALHO NOVO ---
+    ax.text(0.5, 0.93, "buslog.streamlit.app", ha='center', va='center', fontsize=22, color=text_color, weight='bold', transform=ax.transAxes)
+    ax.text(0.5, 0.87, f"@{nome_exibicao} • Últimos {dias} dias", ha='center', va='center', fontsize=14, color=sub_text_color, transform=ax.transAxes)
     
-    # Posição do gráfico (left, bottom, width, height)
-    ax_bar = fig.add_axes([0.15, 0.15, 0.7, 0.35])
+    # Divisória
+    ax.plot([0.1, 0.9], [0.82, 0.82], color='#444', transform=ax.transAxes, linewidth=1)
     
-    linhas = contagem_linhas.index.tolist()[::-1] # Inverte pra o maior ficar em cima
+    # --- STAT PRINCIPAL (TOTAL) ---
+    ax.text(0.5, 0.68, f"{total_viagens}", ha='center', va='center', fontsize=65, color=text_color, weight='bold', transform=ax.transAxes)
+    ax.text(0.5, 0.58, "VIAGENS NO PERÍODO", ha='center', va='center', fontsize=14, color=sub_text_color, transform=ax.transAxes)
+    
+    # --- GRÁFICO DE BARRAS REFORMULADO ---
+    # MUDANÇA CRÍTICA DE ALINHAMENTO: Definir área do gráfico com margem esquerda fixa maior (0.4)
+    # [left, bottom, width, height] em % da figura
+    ax_bar = fig.add_axes([0.4, 0.1, 0.5, 0.4])
+    
+    linhas = contagem_linhas.index.tolist()[::-1]
     valores = contagem_linhas.values.tolist()[::-1]
     
-    bars = ax_bar.barh(linhas, valores, color='#007bff')
-    ax_bar.set_facecolor('#1c1c1e')
-    ax_bar.spines['top'].set_visible(False)
-    ax_bar.spines['right'].set_visible(False)
-    ax_bar.spines['bottom'].set_visible(False)
-    ax_bar.spines['left'].set_visible(False)
-    ax_bar.tick_params(axis='x', colors='#888')
-    ax_bar.tick_params(axis='y', colors='white', labelsize=9)
+    # Adicionado borda branca nas barras para destaque
+    bars = ax_bar.barh(linhas, valores, color=bar_color, edgecolor='white', linewidth=1)
     
-    # Adiciona valores nas barras
+    ax_bar.set_facecolor(bg_color)
+    # Remover todas as bordas do gráfico
+    for spine in ax_bar.spines.values(): spine.set_visible(False)
+    
+    # Remover números do eixo X
+    ax_bar.set_xticks([])
+    
+    # Estilizar os nomes das linhas (Eixo Y)
+    ax_bar.tick_params(axis='y', colors=text_color, labelsize=12, length=0) # length=0 tira o tracinho
+
+    # Adiciona valores na ponta das barras
     for bar in bars:
         width = bar.get_width()
-        ax_bar.text(width + 0.1, bar.get_y() + bar.get_height()/2, f'{int(width)}', va='center', color='white', fontsize=10)
+        # Texto um pouco afastado da barra (+0.2)
+        ax_bar.text(width + 0.2, bar.get_y() + bar.get_height()/2, f'{int(width)}', va='center', color=text_color, fontsize=12, weight='bold')
 
-    # Rodapé
-    ax.text(0.5, 0.05, f"Gerado em {agora.strftime('%d/%m/%Y')}", ha='center', va='center', fontsize=8, color='#555', transform=ax.transAxes)
+    ax.axis('off') # Desliga eixos principais
 
-    # Remove eixos do canvas principal
-    ax.axis('off')
-
-    # Salva em buffer
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight', facecolor='#1c1c1e')
+    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor=fig.get_edgecolor())
     buf.seek(0)
     plt.close(fig)
     return buf
