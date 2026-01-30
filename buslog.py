@@ -83,6 +83,12 @@ st.markdown("""
         position: absolute; top: 10px; left: 10px; text-transform: uppercase; letter-spacing: 0.5px;
     }
 
+    /* BADGES (NOVO) */
+    .badge-container { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+    .badge-item { background-color: #333; padding: 5px 10px; border-radius: 15px; font-size: 12px; color: #eee; border: 1px solid #555; }
+    .xp-bar-bg { width: 100%; background-color: #333; height: 10px; border-radius: 5px; margin-top: 5px; overflow: hidden; }
+    .xp-bar-fill { height: 100%; background-color: #007bff; }
+
     /* FORÇAR CORES DOS BOTÕES DE SEGUIR */
     button[kind="primary"] {
         background-color: #007bff !important;
@@ -250,7 +256,64 @@ def salvar_perfil_editado(usuario, display_name, bio, avatar):
     atualizar_arquivo_github(ARQUIVO_DB_PERFIL, json_str, f"Perfil atualizado: {usuario}")
     return True
 
-# --- GERADOR DE CARD ESTATÍSTICO (V20 - CORREÇÃO DE ERRO) ---
+# --- LÓGICA DE GAMIFICAÇÃO (NOVA) ---
+def calcular_gamificacao(df_user, total_linhas_sistema):
+    if df_user.empty:
+        return {
+            "nivel": 1, "xp_total": 0, "xp_prox": 100, "progresso_nivel": 0,
+            "linhas_unicas": 0, "total_linhas": total_linhas_sistema, "badges": []
+        }
+    
+    # 1. CÁLCULO DE XP
+    total_viagens = len(df_user)
+    linhas_unicas_user = df_user['linha'].unique()
+    qtd_linhas_unicas = len(linhas_unicas_user)
+    
+    # XP Base: 10 por viagem, 20 por linha única
+    xp = (total_viagens * 10) + (qtd_linhas_unicas * 20)
+    nivel = int(xp / 100) + 1
+    xp_prox_nivel = nivel * 100
+    progresso_nivel = (xp % 100) / 100 # Porcentagem 0.0 a 1.0
+
+    # 2. CÁLCULO DE BADGES
+    badges = []
+    
+    # Badge: Veterano (50+ viagens)
+    if total_viagens >= 50: badges.append("🚌 Veterano")
+    
+    # Badge: Explorador (10+ linhas diferentes)
+    if qtd_linhas_unicas >= 10: badges.append("🌍 Explorador")
+    
+    # Badge: Corujão (Viagens 00h-05h)
+    # Garante datetime
+    if 'dt' not in df_user.columns:
+        df_user['dt'] = pd.to_datetime(df_user['data'].astype(str) + ' ' + df_user['hora'].astype(str), errors='coerce')
+    madrugada = df_user[df_user['dt'].dt.hour.isin([0, 1, 2, 3, 4])]
+    if not madrugada.empty: badges.append("🦉 Corujão")
+    
+    # Badge: Ferroviário (Trem/Metrô/VLT)
+    ferroviario = df_user[df_user['linha'].str.contains("Trem|Ramal|Metrô|VLT", case=False, na=False)]
+    if len(ferroviario) >= 1: badges.append("🚆 Ferroviário")
+    
+    # Badge: Expresso (BRT)
+    brt = df_user[df_user['linha'].str.contains("BRT", case=False, na=False)]
+    if len(brt) >= 1: badges.append("🚄 Expresso")
+    
+    # Badge: Marujo (Barcas)
+    barca = df_user[df_user['linha'].str.contains("Barca", case=False, na=False)]
+    if len(barca) >= 1: badges.append("⚓ Marujo")
+
+    return {
+        "nivel": nivel,
+        "xp_total": xp,
+        "xp_prox": xp_prox_nivel,
+        "progresso_nivel": progresso_nivel,
+        "linhas_unicas": qtd_linhas_unicas,
+        "total_linhas": total_linhas_sistema,
+        "badges": badges
+    }
+
+# --- GERADOR DE CARD ESTATÍSTICO ---
 def gerar_card_stats(df_user, nome_exibicao, dias):
     agora = agora_br()
     data_limite = agora - timedelta(days=dias)
@@ -259,7 +322,6 @@ def gerar_card_stats(df_user, nome_exibicao, dias):
     df_filtrado = df_user[df_user['dt'] >= data_limite]
     if df_filtrado.empty: return None
 
-    # --- DADOS ---
     total_viagens = len(df_filtrado)
     contagem_linhas = df_filtrado['linha'].value_counts().head(5)
     
@@ -267,7 +329,6 @@ def gerar_card_stats(df_user, nome_exibicao, dias):
     df_filtrado['dia_semana'] = df_filtrado['dt'].dt.weekday.map(dias_pt)
     contagem_dias = df_filtrado['dia_semana'].value_counts().sort_values(ascending=True)
 
-    # --- MATPLOTLIB ---
     plt.style.use('dark_background')
     fig = plt.figure(figsize=(8, 8))
     
@@ -280,7 +341,6 @@ def gerar_card_stats(df_user, nome_exibicao, dias):
     fig.patch.set_linewidth(4)
     fig.patch.set_edgecolor('#333333')
 
-    # --- GRID ---
     gs = gridspec.GridSpec(1, 2, width_ratios=[1.3, 0.7])
     ax_left = plt.subplot(gs[0])
     ax_right = plt.subplot(gs[1])
@@ -290,7 +350,6 @@ def gerar_card_stats(df_user, nome_exibicao, dias):
     ax_left.axis('off')
     ax_right.axis('off')
 
-    # --- COLUNA ESQUERDA ---
     left_anchor = 0.05
     ax_left.text(left_anchor, 0.94, "buslog.streamlit.app", ha='left', va='center', fontsize=20, color=text_color, weight='bold', transform=ax_left.transAxes)
     ax_left.text(left_anchor, 0.89, f"@{nome_exibicao} • Últimos {dias} dias", ha='left', va='center', fontsize=12, color=sub_text_color, transform=ax_left.transAxes)
@@ -309,26 +368,20 @@ def gerar_card_stats(df_user, nome_exibicao, dias):
         num_lines = len(wrapped_name.split('\n'))
         y_pos -= (0.04 * num_lines) + 0.03
 
-    # --- COLUNA DIREITA (CORREÇÃO DO ERRO) ---
     ax_right.text(0.5, 0.55, "POR DIA DA SEMANA", ha='center', va='center', fontsize=12, color=text_color, weight='bold', transform=ax_right.transAxes)
 
     inset_ax = ax_right.inset_axes([0.1, 0.05, 0.8, 0.45])
     inset_ax.set_facecolor(bg_color)
 
     if not contagem_dias.empty:
-        # AQUI FOI A CORREÇÃO: Usamos posições numéricas para o eixo Y
         dias_labels = contagem_dias.index.tolist()
         valores_dias = contagem_dias.values.tolist()
         y_positions = range(len(dias_labels))
         
-        # Plota usando números no eixo Y
         bars_dias = inset_ax.barh(y_positions, valores_dias, color=orange_color)
-        
-        # Define os textos das labels manualmente
         inset_ax.set_yticks(y_positions)
         inset_ax.set_yticklabels(dias_labels)
         
-        # Limpeza
         for spine in inset_ax.spines.values(): spine.set_visible(False)
         inset_ax.set_xticks([])
         inset_ax.tick_params(axis='y', colors=text_color, labelsize=11, length=0)
@@ -410,22 +463,17 @@ def tocar_buzina():
             st.markdown(f"""<audio autoplay><source src="data:audio/mp4;base64,{b64}" type="audio/mp4"></audio>""", unsafe_allow_html=True)
     except FileNotFoundError: pass 
 
-@st.cache_data(ttl=3600) # Atualiza a cada 1 hora
+@st.cache_data(ttl=3600) 
 def carregar_rotas():
-    # 1. TENTA GITHUB PRIMEIRO (Para pegar as rotas novas)
     dados_nuvem = ler_arquivo_github(ARQUIVO_ROTAS, 'json')
-    if dados_nuvem:
-        return dados_nuvem
-    
-    # 2. Se a nuvem falhar, usa o arquivo local de backup
+    if dados_nuvem: return dados_nuvem
     try:
-        with open(ARQUIVO_ROTAS, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return {}
+        with open(ARQUIVO_ROTAS, "r", encoding="utf-8") as f: return json.load(f)
+    except: return {}
 
 rotas_db = carregar_rotas()
 lista_linhas = list(rotas_db.keys()) if rotas_db else []
+total_linhas_sistema = len(lista_linhas) if lista_linhas else 1
 MESES_PT = {1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL", 5: "MAIO", 6: "JUNHO", 7: "JULHO", 8: "AGOSTO", 9: "SETEMBRO", 10: "OUTUBRO", 11: "NOVEMBRO", 12: "DEZEMBRO"}
 
 # --- INTERFACE ---
@@ -477,6 +525,11 @@ if st.session_state["logado"]:
         segue_voce = meu_user in lista_seguindo
         eh_seguido = visitado in social_db.get(meu_user, [])
         
+        # Gamificação Visitante
+        df_viagens = st.session_state["cache_viagens"]
+        df_visitado = df_viagens[df_viagens['usuario'] == visitado] if not df_viagens.empty else pd.DataFrame()
+        stats = calcular_gamificacao(df_visitado, total_linhas_sistema)
+
         # Header (Nome e Badge)
         st.markdown(f"""
         <div class="profile-header">
@@ -488,6 +541,15 @@ if st.session_state["logado"]:
         </div>
         """, unsafe_allow_html=True)
         
+        # Stats Gamificados
+        st.caption(f"Nível {stats['nivel']} • {int(stats['xp_total'])} XP")
+        if stats['badges']:
+            st.markdown(f"<div class='badge-container'>{''.join([f'<span class=badge-item>{b}</span>' for b in stats['badges']])}</div>", unsafe_allow_html=True)
+        st.write("")
+        st.progress(stats['linhas_unicas'] / max(stats['total_linhas'], 1), text=f"Busodex: {stats['linhas_unicas']} / {stats['total_linhas']} linhas")
+        
+        st.markdown("---")
+
         c_v1, c_v2 = st.columns([2, 1])
         with c_v1:
             if st.session_state["ver_lista_seguidores"]:
@@ -518,7 +580,6 @@ if st.session_state["logado"]:
                     st.session_state["perfil_visitado"] = None; st.rerun()
 
         st.write(""); st.markdown("### 📓 Diário Público")
-        df_viagens = st.session_state["cache_viagens"]
         if not df_viagens.empty:
             dv = df_viagens[df_viagens['usuario'] == visitado]
             if not dv.empty:
@@ -634,7 +695,6 @@ if st.session_state["logado"]:
                             st.session_state["perfil_visitado"] = notif['from_user']; st.rerun()
                         st.markdown("---")
         
-        # --- CONTEÚDO DA NOVA ABA RELATÓRIOS ---
         with aba_reports:
             st.markdown("### 📊 Gerar Relatório")
             st.caption("Crie um card bonito para compartilhar nas redes sociais.")
@@ -644,35 +704,44 @@ if st.session_state["logado"]:
             if st.button("Gerar Card", use_container_width=True):
                 df_viagens = st.session_state["cache_viagens"]
                 if not df_viagens.empty:
-                    # Filtra só o usuário atual
                     df_meu = df_viagens[df_viagens['usuario'] == meu_user].copy()
-                    
                     with st.spinner("Desenhando card..."):
                         imagem_buffer = gerar_card_stats(df_meu, meu_user, periodo)
-                    
                     if imagem_buffer:
                         st.image(imagem_buffer, caption="Seu relatório BusLog", use_container_width=True)
-                        st.download_button(
-                            label="⬇️ Baixar Imagem (PNG)",
-                            data=imagem_buffer,
-                            file_name=f"buslog_report_{meu_user}.png",
-                            mime="image/png",
-                            use_container_width=True
-                        )
-                    else:
-                        st.warning("Você não tem viagens nesse período!")
-                else:
-                    st.warning("Nenhuma viagem registrada ainda.")
+                        st.download_button(label="⬇️ Baixar Imagem (PNG)", data=imagem_buffer, file_name=f"buslog_report_{meu_user}.png", mime="image/png", use_container_width=True)
+                    else: st.warning("Você não tem viagens nesse período!")
+                else: st.warning("Nenhuma viagem registrada ainda.")
 
         with aba_perfil:
             p = carregar_perfil(meu_user)
             lista_seguidores, lista_seguindo = get_seguidores_count(meu_user)
+            
+            # --- LÓGICA DE GAMIFICAÇÃO NO MEU PERFIL ---
+            df_viagens = st.session_state["cache_viagens"]
+            df_meu = df_viagens[df_viagens['usuario'] == meu_user] if not df_viagens.empty else pd.DataFrame()
+            stats = calcular_gamificacao(df_meu, total_linhas_sistema)
             
             if "edit_p" not in st.session_state: st.session_state["edit_p"] = False
             
             if not st.session_state["edit_p"]:
                 st.markdown(f"""<div class="profile-header"><div class="avatar">{p.get('avatar','👤')}</div><div class="display-name">{p.get('display_name', meu_user)}</div><div class="username-tag">@{meu_user}</div><div class="bio-text">"{p.get('bio','')}"</div></div>""", unsafe_allow_html=True)
                 
+                # Exibição de Nível e XP
+                cx1, cx2 = st.columns([3, 1])
+                cx1.write(f"**Nível {stats['nivel']}**")
+                cx1.progress(stats['progresso_nivel'])
+                cx2.write(f"{int(stats['xp_total'])} XP")
+                
+                # Exibição de Badges
+                if stats['badges']:
+                    st.markdown(f"<div class='badge-container'>{''.join([f'<span class=badge-item>{b}</span>' for b in stats['badges']])}</div>", unsafe_allow_html=True)
+                
+                st.write("")
+                st.progress(stats['linhas_unicas'] / max(stats['total_linhas'], 1), text=f"Busodex: {stats['linhas_unicas']} / {stats['total_linhas']} linhas desbloqueadas")
+                
+                st.markdown("---")
+
                 if st.session_state["ver_lista_seguidores"]:
                     tipo_lista = st.session_state["ver_lista_seguidores"]
                     lista_exibir = lista_seguidores if tipo_lista == 'seguidores' else lista_seguindo
