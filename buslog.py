@@ -9,7 +9,8 @@ import bcrypt
 import base64
 import threading
 import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
+import matplotlib.gridspec as gridspec
+import textwrap # Importante para quebrar o texto das linhas
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(page_title="BusLog", page_icon="🚌", layout="centered")
@@ -249,7 +250,7 @@ def salvar_perfil_editado(usuario, display_name, bio, avatar):
     atualizar_arquivo_github(ARQUIVO_DB_PERFIL, json_str, f"Perfil atualizado: {usuario}")
     return True
 
-# --- GERADOR DE CARD ESTATÍSTICO (V18 - REDESIGN) ---
+# --- GERADOR DE CARD ESTATÍSTICO (V19 - REDESIGN RADICAL) ---
 def gerar_card_stats(df_user, nome_exibicao, dias):
     agora = agora_br()
     data_limite = agora - timedelta(days=dias)
@@ -258,70 +259,103 @@ def gerar_card_stats(df_user, nome_exibicao, dias):
     df_filtrado = df_user[df_user['dt'] >= data_limite]
     if df_filtrado.empty: return None
 
+    # --- PREPARAÇÃO DOS DADOS ---
     total_viagens = len(df_filtrado)
     contagem_linhas = df_filtrado['linha'].value_counts().head(5)
     
-    # --- MATPLOTLIB ---
+    # Dados para o gráfico de dias da semana
+    dias_pt = {0: 'Seg', 1: 'Ter', 2: 'Qua', 3: 'Qui', 4: 'Sex', 5: 'Sáb', 6: 'Dom'}
+    df_filtrado['dia_semana'] = df_filtrado['dt'].dt.weekday.map(dias_pt)
+    contagem_dias = df_filtrado['dia_semana'].value_counts().sort_values(ascending=True)
+
+    # --- MATPLOTLIB SETUP (QUADRADO REAL 8x8) ---
     plt.style.use('dark_background')
-    # MUDANÇA 1: TORNAR QUADRADO (8x8 polegadas)
-    fig, ax = plt.subplots(figsize=(8, 8))
+    fig = plt.figure(figsize=(8, 8))
     
-    # Cores e Estilo
     bg_color = '#1c1c1e'
-    accent_color = '#FF4B4B'
     text_color = '#ffffff'
     sub_text_color = '#aaaaaa'
-    bar_color = '#007bff'
-    
+    orange_color = '#ff7f0e' # Laranja para dias
+
     fig.patch.set_facecolor(bg_color)
-    ax.set_facecolor(bg_color)
-    
-    # Borda no Card inteiro
+    # Borda externa sólida
     fig.patch.set_linewidth(4)
     fig.patch.set_edgecolor('#333333')
 
-    # --- CABEÇALHO NOVO ---
-    ax.text(0.5, 0.93, "buslog.streamlit.app", ha='center', va='center', fontsize=22, color=text_color, weight='bold', transform=ax.transAxes)
-    ax.text(0.5, 0.87, f"@{nome_exibicao} • Últimos {dias} dias", ha='center', va='center', fontsize=14, color=sub_text_color, transform=ax.transAxes)
+    # --- LAYOUT DE GRID (2 COLUNAS) ---
+    # A coluna da esquerda é um pouco mais larga para caber os nomes dos ônibus
+    gs = gridspec.GridSpec(1, 2, width_ratios=[1.3, 0.7])
+    ax_left = plt.subplot(gs[0])
+    ax_right = plt.subplot(gs[1])
     
-    # Divisória
-    ax.plot([0.1, 0.9], [0.82, 0.82], color='#444', transform=ax.transAxes, linewidth=1)
-    
-    # --- STAT PRINCIPAL (TOTAL) ---
-    ax.text(0.5, 0.68, f"{total_viagens}", ha='center', va='center', fontsize=65, color=text_color, weight='bold', transform=ax.transAxes)
-    ax.text(0.5, 0.58, "VIAGENS NO PERÍODO", ha='center', va='center', fontsize=14, color=sub_text_color, transform=ax.transAxes)
-    
-    # --- GRÁFICO DE BARRAS REFORMULADO ---
-    # MUDANÇA CRÍTICA DE ALINHAMENTO: Definir área do gráfico com margem esquerda fixa maior (0.4)
-    # [left, bottom, width, height] em % da figura
-    ax_bar = fig.add_axes([0.4, 0.1, 0.5, 0.4])
-    
-    linhas = contagem_linhas.index.tolist()[::-1]
-    valores = contagem_linhas.values.tolist()[::-1]
-    
-    # Adicionado borda branca nas barras para destaque
-    bars = ax_bar.barh(linhas, valores, color=bar_color, edgecolor='white', linewidth=1)
-    
-    ax_bar.set_facecolor(bg_color)
-    # Remover todas as bordas do gráfico
-    for spine in ax_bar.spines.values(): spine.set_visible(False)
-    
-    # Remover números do eixo X
-    ax_bar.set_xticks([])
-    
-    # Estilizar os nomes das linhas (Eixo Y)
-    ax_bar.tick_params(axis='y', colors=text_color, labelsize=12, length=0) # length=0 tira o tracinho
+    ax_left.set_facecolor(bg_color)
+    ax_right.set_facecolor(bg_color)
+    ax_left.axis('off')
+    ax_right.axis('off')
 
-    # Adiciona valores na ponta das barras
-    for bar in bars:
-        width = bar.get_width()
-        # Texto um pouco afastado da barra (+0.2)
-        ax_bar.text(width + 0.2, bar.get_y() + bar.get_height()/2, f'{int(width)}', va='center', color=text_color, fontsize=12, weight='bold')
+    # --- COLUNA ESQUERDA (ALINHADA À ESQUERDA) ---
+    # Âncora X para alinhamento esquerdo perfeito
+    left_anchor = 0.05
 
-    ax.axis('off') # Desliga eixos principais
+    # Cabeçalho
+    ax_left.text(left_anchor, 0.94, "buslog.streamlit.app", ha='left', va='center', fontsize=20, color=text_color, weight='bold', transform=ax_left.transAxes)
+    ax_left.text(left_anchor, 0.89, f"@{nome_exibicao} • Últimos {dias} dias", ha='left', va='center', fontsize=12, color=sub_text_color, transform=ax_left.transAxes)
+    
+    # Divisória Esquerda
+    ax_left.plot([left_anchor, 0.9], [0.85, 0.85], color='#444', transform=ax_left.transAxes, linewidth=1)
 
+    # Total Viagens Gigante
+    ax_left.text(left_anchor, 0.72, f"{total_viagens}", ha='left', va='bottom', fontsize=70, color=text_color, weight='bold', transform=ax_left.transAxes)
+    ax_left.text(left_anchor, 0.68, "VIAGENS NO PERÍODO", ha='left', va='top', fontsize=12, color=sub_text_color, transform=ax_left.transAxes)
+
+    # Lista Top 5 Linhas (Texto Justificado)
+    ax_left.text(left_anchor, 0.55, "TOP LINHAS", ha='left', va='center', fontsize=14, color=text_color, weight='bold', transform=ax_left.transAxes)
+    
+    y_pos = 0.48
+    for i, (linha, count) in enumerate(contagem_linhas.items()):
+        # Quebra o texto em várias linhas se for muito longo (largura aprox 28 caracteres)
+        wrapped_name = textwrap.fill(linha, width=28)
+        
+        # O nome da linha
+        ax_left.text(left_anchor, y_pos, wrapped_name, ha='left', va='top', fontsize=11, color=text_color, transform=ax_left.transAxes, linespacing=1.2)
+        # A contagem ao lado
+        ax_left.text(0.9, y_pos, f"{count}x", ha='right', va='top', fontsize=11, color=sub_text_color, weight='bold', transform=ax_left.transAxes)
+        
+        # Calcula o espaço necessário baseado nas quebras de linha para o próximo item
+        num_lines = len(wrapped_name.split('\n'))
+        y_pos -= (0.04 * num_lines) + 0.03 # Espaçamento dinâmico
+
+    # --- COLUNA DIREITA (GRÁFICO DIAS DA SEMANA LARANJA) ---
+    # Título do gráfico da direita
+    ax_right.text(0.5, 0.55, "POR DIA DA SEMANA", ha='center', va='center', fontsize=12, color=text_color, weight='bold', transform=ax_right.transAxes)
+
+    # Área do gráfico de barras dentro da coluna direita
+    # [left, bottom, width, height] relativos ao ax_right
+    inset_ax = ax_right.inset_axes([0.1, 0.05, 0.8, 0.45])
+    inset_ax.set_facecolor(bg_color)
+
+    if not contagem_dias.empty:
+        dias = contagem_dias.index.tolist()
+        valores_dias = contagem_dias.values.tolist()
+        # Barras laranjas, sem borda branca ridícula
+        bars_dias = inset_ax.barh(dias, valores_dias, color=orange_color)
+        
+        # Limpeza do gráfico
+        for spine in inset_ax.spines.values(): spine.set_visible(False)
+        inset_ax.set_xticks([])
+        inset_ax.tick_params(axis='y', colors=text_color, labelsize=11, length=0)
+
+        # Valores nas barras laranjas
+        for bar in bars_dias:
+            width = bar.get_width()
+            inset_ax.text(width + 0.1, bar.get_y() + bar.get_height()/2, f'{int(width)}', va='center', color=text_color, fontsize=10, weight='bold')
+    else:
+        inset_ax.text(0.5, 0.5, "Sem dados", ha='center', va='center', color=sub_text_color)
+        inset_ax.axis('off')
+
+    # Salva sem cortar (bbox_inches=None para respeitar o quadrado 8x8)
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor=fig.get_edgecolor())
+    plt.savefig(buf, format='png', dpi=150, facecolor=fig.get_facecolor(), edgecolor=fig.get_edgecolor())
     buf.seek(0)
     plt.close(fig)
     return buf
